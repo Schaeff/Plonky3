@@ -212,7 +212,11 @@ where
         pcs.get_evaluations_on_domain(&proving_key.preprocessed_data, 0, quotient_domain)
     });
 
-    let trace_on_quotient_domain = pcs.get_evaluations_on_domain(&trace_data, 0, quotient_domain);
+    let trace_on_quotient_domain = committed_data
+        .unwrap()
+        .traces
+        .iter()
+        .map(|trace| pcs.get_evaluations_on_domain(trace, 0, quotient_domain));
 
     // let permutation_on_quotient_domain =
     //     pcs.get_evaluations_on_domain(&permutation_trace, 0, quotient_domain);
