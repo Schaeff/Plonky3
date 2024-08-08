@@ -212,14 +212,20 @@ where
         pcs.get_evaluations_on_domain(&proving_key.preprocessed_data, 0, quotient_domain)
     });
 
-    let trace_on_quotient_domain = committed_data
-        .unwrap()
-        .traces
-        .iter()
-        .map(|trace| pcs.get_evaluations_on_domain(trace, 0, quotient_domain));
+    let traces_on_quotient_domain = committed_data.map(|committed_data| {
+        committed_data
+            .traces
+            .iter()
+            .map(|trace| pcs.get_evaluations_on_domain(trace, 0, quotient_domain))
+            .collect()
+    });
 
     // let permutation_on_quotient_domain =
     //     pcs.get_evaluations_on_domain(&permutation_trace, 0, quotient_domain);
+    let public_values = match committed_data {
+        Some(data) => data.public_values, // this needs
+        _ => Vec::new(),
+    };
 
     let quotient_values = quotient_values(
         air,
@@ -227,8 +233,7 @@ where
         trace_domain,
         quotient_domain,
         preprocessed_on_quotient_domain,
-        trace_on_quotient_domain,
-        multistage_on_quotient_domain,
+        traces_on_quotient_domain,
         alpha,
     );
     let quotient_flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
@@ -314,8 +319,7 @@ fn quotient_values<SC, A, Mat>(
     trace_domain: Domain<SC>,
     quotient_domain: Domain<SC>,
     preprocessed_on_quotient_domain: Option<Mat>,
-    trace_on_quotient_domain: Mat,
-    multistage_on_quotient_domain: Option<Vec<Mat>>,
+    traces_on_quotient_domain: Vec<Mat>,
     alpha: SC::Challenge,
 ) -> Vec<SC::Challenge>
 where
@@ -328,7 +332,10 @@ where
         .as_ref()
         .map(Matrix::width)
         .unwrap_or_default();
-    let width = trace_on_quotient_domain.width();
+    let widths = traces_on_quotient_domain
+        .iter()
+        .map(|trace| trace.width())
+        .collect::<Vec<usize>>();
     let mut sels = trace_domain.selectors_on_coset(quotient_domain);
 
     let qdb = log2_strict_usize(quotient_domain.size()) - log2_strict_usize(trace_domain.size());
