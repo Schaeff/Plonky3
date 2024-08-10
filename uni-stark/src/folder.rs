@@ -9,7 +9,7 @@ use crate::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
 #[derive(Debug)]
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
-    pub main: RowMajorMatrix<PackedVal<SC>>,
+    pub stages: Vec<RowMajorMatrix<PackedVal<SC>>>,
     pub preprocessed: RowMajorMatrix<PackedVal<SC>>,
     pub public_values: &'a Vec<Val<SC>>,
     pub is_first_row: PackedVal<SC>,
@@ -40,7 +40,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
     type M = RowMajorMatrix<PackedVal<SC>>;
 
     fn main(&self) -> Self::M {
-        self.main.clone()
+        self.stages[0].clone()
     }
 
     fn is_first_row(&self) -> Self::Expr {

@@ -55,22 +55,25 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     pub preprocessed_commit: Com<SC>,
 }
 
-pub struct CommittedData<SC: StarkGenericConfig + PolynomialSpace> {
+/// Updating with each new trace
+pub struct UpdatingCommitData<'a, SC: StarkGenericConfig + PolynomialSpace> {
     pub(crate) trace_commits: Vec<Com<SC>>,
     pub(crate) traces: Vec<PcsProverData<SC>>,
-    pub(crate) public_values: Vec<Vec<Val<SC>>>, // should also include challenge values
+    pub(crate) public_values: Vec<&'a Vec<Val<SC>>>, // should also include challenge values
+    pub(crate) challenger: &'a mut SC::Challenger,
 }
 
-impl<SC: StarkGenericConfig + PolynomialSpace> CommittedData<SC> {
-    pub(crate) fn update_stage(
-        &mut self,
-        trace_commit: Com<SC>,
-        trace: PcsProverData<SC>,
-        publics: Vec<Val<SC>>,
-    ) {
-        self.trace_commits.push(trace_commit);
-        self.traces.push(trace);
-        self.public_values.push(publics);
+pub struct IncomingData<'a, SC: StarkGenericConfig + PolynomialSpace> {
+    pub(crate) incoming_trace: PcsProverData<SC>,
+    pub(crate) incoming_publics: &'a Vec<Val<SC>>,
+    pub(crate) incoming_commit: Com<SC>,
+}
+
+impl<'a, SC: StarkGenericConfig + PolynomialSpace> UpdatingCommitData<'a, SC> {
+    pub(crate) fn update_stage(&mut self, incoming_data: IncomingData<'a, SC>) {
+        self.trace_commits.push(incoming_data.incoming_commit);
+        self.traces.push(incoming_data.incoming_trace);
+        self.public_values.push(incoming_data.incoming_publics);
     }
 }
 

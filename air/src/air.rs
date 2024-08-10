@@ -162,6 +162,14 @@ pub trait PermutationAirBuilder: ExtensionBuilder {
     fn permutation_randomness(&self) -> &[Self::RandomVar];
 }
 
+pub trait MultistageAirBuilder: AirBuilder {
+    type ChallengeVar: Into<Self::Expr> + Copy;
+    /// Traces from each stage.
+    fn multi_stage(&self, stage: u32) -> Self::M;
+
+    /// Challenges from each stage, as public elements.
+    fn challenges(&self, stage: u32) -> &[Self::ChallengeVar];
+}
 #[derive(Debug)]
 pub struct FilteredAirBuilder<'a, AB: AirBuilder> {
     pub inner: &'a mut AB,

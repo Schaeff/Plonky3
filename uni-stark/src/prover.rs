@@ -16,8 +16,8 @@ use tracing::{info_span, instrument};
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::{
-    Commitments, CommittedData, Domain, NextStageTraceCallback, OpenedValues, PackedChallenge,
-    PackedVal, Proof, ProverConstraintFolder, StarkGenericConfig, StarkProvingKey, Val,
+    Commitments, Domain, NextStageTraceCallback, OpenedValues, PackedChallenge, PackedVal, Proof,
+    ProverConstraintFolder, StarkGenericConfig, StarkProvingKey, UpdatingCommitData, Val,
 };
 
 #[instrument(skip_all)]
@@ -120,7 +120,7 @@ where
                 challenger,
                 pcs,
                 trace_domain,
-                main_trace,
+                next_stage_trace,
                 &challenge_values.values().collect(),
                 committed_data,
             );
@@ -144,19 +144,19 @@ pub fn run_stage<
     #[cfg(debug_assertions)] A: for<'a> Air<crate::check_constraints::DebugConstraintBuilder<'a, Val<SC>>>,
     #[cfg(not(debug_assertions))] A,
 >(
-    challenger: &mut SC::Challenger,
-    pcs: &<SC as StarkGenericConfig>::Pcs,
-    trace_domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
-        <SC as StarkGenericConfig>::Challenge,
-        <SC as StarkGenericConfig>::Challenger,
-    >>::Domain,
-    trace: RowMajorMatrix<Val<SC>>,
-    public_values: &Vec<Val<SC>>,
-    committed_data: Option<&mut CommittedData<SC>>,
-) -> Option<&mut CommittedData<SC>>
+    // challenger: &mut SC::Challenger,
+    // pcs: &<SC as StarkGenericConfig>::Pcs,
+    // trace_domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
+    //     <SC as StarkGenericConfig>::Challenge,
+    //     <SC as StarkGenericConfig>::Challenger,
+    // >>::Domain,
+    // trace: RowMajorMatrix<Val<SC>>,
+    // public_values: &Vec<Val<SC>>,
+    committed_data: &mut UpdatingCommitData<SC>,
+    incoming_data: IncomingData<SC>,
+) -> &mut UpdatingCommitData<SC>
 where
     SC: StarkGenericConfig + PolynomialSpace,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
 {
     let (trace_commit, trace_data) =
         info_span!("commit to trace data").in_scope(|| pcs.commit(vec![(trace_domain, trace)]));
@@ -165,7 +165,7 @@ where
     challenger.observe_slice(public_values);
 
     committed_data
-        .unwrap_or(&mut CommittedData {
+        .unwrap_or(&mut UpdatingCommitData {
             trace_commits: Vec::new(),
             traces: Vec::new(),
             public_values: Vec::new(),
@@ -192,15 +192,30 @@ pub fn finish<
     >>::Domain,
     challenger: &mut SC::Challenger,
     air: &A,
-    committed_data: Option<&mut CommittedData<SC>>,
+    committed_data: Option<&mut UpdatingCommitData<SC>>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig + p3_commit::PolynomialSpace,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
 {
+    // #[cfg(debug_assertions)]
+    // crate::check_constraints::check_constraints(
+    //     air,
+    //     &air.preprocessed_trace()
+    //         .unwrap_or(RowMajorMatrix::new(vec![], 0)),
+    //     &trace,
+    //     public_values,
+    // );
+
     // changes for challenges
-    let log_quotient_degree =
-        get_log_quotient_degree::<Val<SC>, A>(air, committed_data.unwrap().public_values.len());
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+        air,
+        committed_data // the total length of public values and challenges
+            .unwrap()
+            .public_values
+            .iter()
+            .fold(0, |length, vals| length + vals.len()),
+    );
     let quotient_degree = 1 << log_quotient_degree;
 
     let alpha: SC::Challenge = challenger.sample_ext_element();
@@ -219,11 +234,10 @@ where
             .map(|trace| pcs.get_evaluations_on_domain(trace, 0, quotient_domain))
             .collect()
     });
-
     // let permutation_on_quotient_domain =
     //     pcs.get_evaluations_on_domain(&permutation_trace, 0, quotient_domain);
     let public_values = match committed_data {
-        Some(data) => data.public_values, // this needs
+        Some(data) => data.public_values, // needs to be flattened
         _ => Vec::new(),
     };
 
@@ -236,6 +250,7 @@ where
         traces_on_quotient_domain,
         alpha,
     );
+
     let quotient_flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
     let quotient_chunks = quotient_domain.split_evals(quotient_degree, quotient_flat);
     let qc_domains = quotient_domain.split_domains(quotient_degree);
@@ -374,18 +389,26 @@ where
                 preprocessed_width,
             );
 
-            let main = RowMajorMatrix::new(
-                iter::empty()
-                    .chain(trace_on_quotient_domain.vertically_packed_row(i_start))
-                    .chain(trace_on_quotient_domain.vertically_packed_row(i_start + next_step))
-                    .collect_vec(),
-                width,
-            );
+            let stages = traces_on_quotient_domain
+                .iter()
+                .zip(widths.iter())
+                .map(|(trace_on_quotient_domain, width)| {
+                    RowMajorMatrix::new(
+                        iter::empty()
+                            .chain(trace_on_quotient_domain.vertically_packed_row(i_start))
+                            .chain(
+                                trace_on_quotient_domain.vertically_packed_row(i_start + next_step),
+                            )
+                            .collect_vec(),
+                        *width,
+                    )
+                })
+                .collect::<Vec<RowMajorMatrix<PackedVal<SC>>>>();
 
             let accumulator = PackedChallenge::<SC>::zero();
             let mut folder = ProverConstraintFolder {
+                stages,
                 preprocessed,
-                main,
                 public_values,
                 is_first_row,
                 is_last_row,
