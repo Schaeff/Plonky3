@@ -16,8 +16,9 @@ use tracing::{info_span, instrument};
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::{
-    Commitments, Domain, NextStageTraceCallback, OpenedValues, PackedChallenge, PackedVal, Proof,
-    ProverConstraintFolder, StarkGenericConfig, StarkProvingKey, UpdatingCommitData, Val,
+    Commitments, Domain, IncomingData, NextStageTraceCallback, OpenedValues, PackedChallenge,
+    PackedVal, Proof, ProverConstraintFolder, StarkGenericConfig, StarkProvingKey,
+    UpdatingCommitData, Val,
 };
 
 #[instrument(skip_all)]
@@ -88,7 +89,6 @@ where
     if let Some(proving_key) = proving_key {
         challenger.observe(proving_key.preprocessed_commit.clone())
     };
-
     // commitments to main trace
     let committed_data = run_stage(
         challenger,
@@ -116,14 +116,7 @@ where
                 .unwrap()
                 .get_next_stage_trace(stage as u32, challenge_values); // callback to generate trace, this has to store
 
-            committed_data = run_stage(
-                challenger,
-                pcs,
-                trace_domain,
-                next_stage_trace,
-                &challenge_values.values().collect(),
-                committed_data,
-            );
+            committed_data = run_stage(trace_domain, committed_data, incoming_data);
         });
 
     finish(
@@ -140,8 +133,9 @@ where
 #[instrument(skip_all)]
 #[allow(clippy::multiple_bound_locations)] // cfg not supported in where clauses?
 pub fn run_stage<
+    'a,
     SC,
-    #[cfg(debug_assertions)] A: for<'a> Air<crate::check_constraints::DebugConstraintBuilder<'a, Val<SC>>>,
+    #[cfg(debug_assertions)] A: for<'b> Air<crate::check_constraints::DebugConstraintBuilder<'b, Val<SC>>>,
     #[cfg(not(debug_assertions))] A,
 >(
     // challenger: &mut SC::Challenger,
@@ -153,24 +147,20 @@ pub fn run_stage<
     // trace: RowMajorMatrix<Val<SC>>,
     // public_values: &Vec<Val<SC>>,
     committed_data: &mut UpdatingCommitData<SC>,
-    incoming_data: IncomingData<SC>,
-) -> &mut UpdatingCommitData<SC>
+    incoming_data: IncomingData<'a, SC>,
+) -> &mut UpdatingCommitData<'a, SC>
 where
     SC: StarkGenericConfig + PolynomialSpace,
 {
     let (trace_commit, trace_data) =
         info_span!("commit to trace data").in_scope(|| pcs.commit(vec![(trace_domain, trace)]));
 
-    challenger.observe(trace_commit.clone());
-    challenger.observe_slice(public_values);
-
+    committed_data.challenger.observe(trace_commit.clone());
     committed_data
-        .unwrap_or(&mut UpdatingCommitData {
-            trace_commits: Vec::new(),
-            traces: Vec::new(),
-            public_values: Vec::new(),
-        })
-        .update_stage(trace_commit, trace_data, public_values);
+        .challenger
+        .observe_slice(incoming_data.public_values);
+
+    committed_data.update_stage(incoming_data);
     // TODO: Might be best practice to include other instance data here; see verifier comment.
 
     committed_data

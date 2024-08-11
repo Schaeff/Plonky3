@@ -55,26 +55,62 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     pub preprocessed_commit: Com<SC>,
 }
 
-/// Updating with each new trace
+/// Updating with each new trace in every stage
 pub struct UpdatingCommitData<'a, SC: StarkGenericConfig + PolynomialSpace> {
     pub(crate) trace_commits: Vec<Com<SC>>,
     pub(crate) traces: Vec<PcsProverData<SC>>,
     pub(crate) public_values: Vec<&'a Vec<Val<SC>>>, // should also include challenge values
     pub(crate) challenger: &'a mut SC::Challenger,
-}
-
-pub struct IncomingData<'a, SC: StarkGenericConfig + PolynomialSpace> {
-    pub(crate) incoming_trace: PcsProverData<SC>,
-    pub(crate) incoming_publics: &'a Vec<Val<SC>>,
-    pub(crate) incoming_commit: Com<SC>,
+    pcs: &'a <SC>::Pcs,
+    domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
+        <SC as StarkGenericConfig>::Challenge,
+        <SC as StarkGenericConfig>::Challenger,
+    >>::Domain,
 }
 
 impl<'a, SC: StarkGenericConfig + PolynomialSpace> UpdatingCommitData<'a, SC> {
-    pub(crate) fn update_stage(&mut self, incoming_data: IncomingData<'a, SC>) {
-        self.trace_commits.push(incoming_data.incoming_commit);
-        self.traces.push(incoming_data.incoming_trace);
-        self.public_values.push(incoming_data.incoming_publics);
+    pub(crate) fn new(
+        pcs: &'a <SC as StarkGenericConfig>::Pcs,
+        domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
+            <SC as StarkGenericConfig>::Challenge,
+            <SC as StarkGenericConfig>::Challenger,
+        >>::Domain,
+        challenger: &'a mut <SC as StarkGenericConfig>::Challenger,
+    ) -> Self {
+        Self {
+            trace_commits: Vec::new(),
+            traces: Vec::new(),
+            public_values: Vec::new(),
+            challenger,
+            pcs,
+            domain,
+        }
     }
+
+    pub(crate) fn get_pcs(&self) -> &'a <SC>::Pcs {
+        self.pcs
+    }
+
+    pub(crate) fn get_domain(
+        &self,
+    ) -> <<SC as StarkGenericConfig>::Pcs as Pcs<
+        <SC as StarkGenericConfig>::Challenge,
+        <SC as StarkGenericConfig>::Challenger,
+    >>::Domain {
+        self.domain
+    }
+
+    pub(crate) fn update_stage(&mut self, incoming_data: IncomingData<'a, SC>) {
+        self.trace_commits.push(incoming_data.commit);
+        self.traces.push(incoming_data.trace);
+        self.public_values.push(incoming_data.public_values);
+    }
+}
+
+pub struct IncomingData<'a, SC: StarkGenericConfig + PolynomialSpace> {
+    pub(crate) trace: PcsProverData<SC>,
+    pub(crate) public_values: &'a Vec<Val<SC>>,
+    pub(crate) commit: Com<SC>,
 }
 
 pub trait NextStageTraceCallback<SC: StarkGenericConfig, T> {
