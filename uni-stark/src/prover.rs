@@ -75,7 +75,7 @@ where
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
     T: NextStageTraceCallback<SC, Val<SC>>,
 {
-    let degree = main_trace.height(); // all traces have the same height
+    let degree = main_trace.height();
     let log_degree = log2_strict_usize(degree);
 
     let pcs = config.pcs();
@@ -89,13 +89,13 @@ where
         challenger.observe(proving_key.preprocessed_commit.clone())
     };
     // commitments to main trace
-    let committed_data = State::new(pcs, trace_domain, challenger);
+    let committed_data = State::new(pcs, trace_domain, challenger, log_degree);
     let stage_zero = Stage {
         trace: main_trace,
         public_values,
     };
 
-    let main_state = run_stage(committed_data, stage_zero);
+    let state = run_stage(committed_data, stage_zero);
 
     challenges
         .into_iter()
@@ -114,24 +114,15 @@ where
                 .unwrap()
                 .get_next_stage_trace(stage as u32, challenge_values); // callback to generate trace, this has to store
 
-            let incoming_stage_data =
-                committed_data = run_stage(trace_domain, committed_data, incoming_data);
+            let incoming_stage_data = committed_data = run_stage(state, stage);
         });
 
-    finish(
-        pcs,
-        proving_key,
-        log_degree,
-        trace_domain,
-        challenger,
-        air,
-        committed_data,
-    )
+    finish(proving_key, air, state)
 }
 
 pub fn run_stage<'a, SC>(state: State<'a, SC>, stage: Stage<SC>) -> State<'a, SC>
 where
-    SC: StarkGenericConfig + p3_commit::PolynomialSpace,
+    SC: StarkGenericConfig,
 {
     let pcs = state.get_pcs();
     let trace_domain = state.get_trace_domain();
@@ -156,16 +147,17 @@ pub fn finish<
     #[cfg(debug_assertions)] A: for<'a> Air<crate::check_constraints::DebugConstraintBuilder<'a, Val<SC>>>,
     #[cfg(not(debug_assertions))] A,
 >(
-    pcs: &<SC as StarkGenericConfig>::Pcs,
+    // pcs: &<SC as StarkGenericConfig>::Pcs,
     proving_key: Option<&StarkProvingKey<SC>>,
-    log_degree: usize,
-    trace_domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
-        <SC as StarkGenericConfig>::Challenge,
-        <SC as StarkGenericConfig>::Challenger,
-    >>::Domain,
-    challenger: &mut SC::Challenger,
+    // log_degree: usize,
+    // trace_domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
+    //     <SC as StarkGenericConfig>::Challenge,
+    //     <SC as StarkGenericConfig>::Challenger,
+    // >>::Domain,
+    // challenger: &mut SC::Challenger,
     air: &A,
-    committed_data: Option<&mut State<SC>>,
+    // committed_data: Option<&mut State<SC>>,
+    state: State<SC>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig + p3_commit::PolynomialSpace,
@@ -183,15 +175,19 @@ where
     // changes for challenges
     let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
         air,
-        committed_data // the total length of public values and challenges
-            .unwrap()
+        state // the total length of public values and challenges
             .public_values
             .iter()
             .fold(0, |length, vals| length + vals.len()),
     );
     let quotient_degree = 1 << log_quotient_degree;
+    let challenger = state.get_challenger();
 
     let alpha: SC::Challenge = challenger.sample_ext_element();
+
+    let trace_domain = state.get_trace_domain();
+    let log_degree = state.get_log_degree();
+    let pcs = state.get_pcs();
 
     let quotient_domain =
         trace_domain.create_disjoint_domain(1 << (log_degree + log_quotient_degree));
@@ -200,7 +196,7 @@ where
         pcs.get_evaluations_on_domain(&proving_key.preprocessed_data, 0, quotient_domain)
     });
 
-    let traces_on_quotient_domain = committed_data.map(|committed_data| {
+    let traces_on_quotient_domain = state.trace_commits.map(|committed_data| {
         committed_data
             .traces
             .iter()

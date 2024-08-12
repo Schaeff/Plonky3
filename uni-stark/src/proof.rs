@@ -3,12 +3,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use p3_challenger::CanObserve;
-use p3_commit::{Pcs, PolynomialSpace, Val};
+use p3_commit::{Pcs, PolynomialSpace};
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 use tracing::info_span;
 
-use crate::StarkGenericConfig;
+use crate::{StarkGenericConfig, Val};
 
 type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
@@ -59,7 +59,7 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
 }
 
 /// Updating with each new trace in every stage
-pub struct State<'a, SC: StarkGenericConfig + PolynomialSpace> {
+pub struct State<'a, SC: StarkGenericConfig> {
     pub(crate) trace_commits: Vec<Com<SC>>,
     pub(crate) traces: Vec<RowMajorMatrix<Val<SC>>>,
     pub(crate) public_values: Vec<&'a Vec<Val<SC>>>, // should also include challenge values
@@ -69,9 +69,10 @@ pub struct State<'a, SC: StarkGenericConfig + PolynomialSpace> {
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::Domain,
+    log_degree: usize,
 }
 
-impl<'a, SC: StarkGenericConfig + PolynomialSpace> State<'a, SC> {
+impl<'a, SC: StarkGenericConfig> State<'a, SC> {
     pub(crate) fn new(
         pcs: &'a <SC as StarkGenericConfig>::Pcs,
         trace_domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
@@ -79,6 +80,7 @@ impl<'a, SC: StarkGenericConfig + PolynomialSpace> State<'a, SC> {
             <SC as StarkGenericConfig>::Challenger,
         >>::Domain,
         challenger: &'a mut <SC as StarkGenericConfig>::Challenger,
+        log_degree: usize,
     ) -> Self {
         Self {
             trace_commits: Vec::new(),
@@ -87,11 +89,17 @@ impl<'a, SC: StarkGenericConfig + PolynomialSpace> State<'a, SC> {
             challenger,
             pcs,
             trace_domain,
+            log_degree,
         }
     }
 
     pub(crate) fn from(self) -> Self {
-        let mut new = Self::new(self.pcs, self.trace_domain, self.challenger);
+        let mut new = Self::new(
+            self.pcs,
+            self.trace_domain,
+            self.challenger,
+            self.log_degree,
+        );
         new.traces = self.traces.clone();
         new.trace_commits = self.trace_commits.clone();
         new.public_values = self.public_values.clone();
@@ -114,13 +122,17 @@ impl<'a, SC: StarkGenericConfig + PolynomialSpace> State<'a, SC> {
     >>::Domain {
         self.trace_domain
     }
+
+    pub(crate) fn get_log_degree(&self) -> usize {
+        self.log_degree
+    }
     pub(crate) fn update_from_stage(&mut self, stage: Stage<'a, SC>) {
         self.traces.push(stage.trace);
         self.public_values.push(stage.public_values);
     }
 }
 
-pub struct Stage<'a, SC: StarkGenericConfig + PolynomialSpace> {
+pub struct Stage<'a, SC: StarkGenericConfig> {
     pub(crate) trace: RowMajorMatrix<Val<SC>>,
     pub(crate) public_values: &'a Vec<Val<SC>>,
 }
