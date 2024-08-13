@@ -110,18 +110,6 @@ where
         })
         .collect::<Vec<Stage<SC>>>();
 
-    // let next_stage = challenge_values
-    //     .values()
-    //     .cloned()
-    //     .collect::<Vec<SC::Challenge>>();
-
-    // // calculating next stage trace
-    // let next_stage_trace = next_stage_trace_callback
-    //     .unwrap()
-    //     .get_next_stage_trace(stage_idx as u32, challenge_values); // callback to generate trace, this has to store
-
-    // let incoming_stage_data = committed_data = run_stage(state, stage);
-
     finish(
         proving_key,
         air,
@@ -139,16 +127,8 @@ pub fn finish<
     #[cfg(debug_assertions)] A: for<'a> Air<crate::check_constraints::DebugConstraintBuilder<'a, Val<SC>>>,
     #[cfg(not(debug_assertions))] A,
 >(
-    // pcs: &<SC as StarkGenericConfig>::Pcs,
     proving_key: Option<&StarkProvingKey<SC>>,
-    // log_degree: usize,
-    // trace_domain: <<SC as StarkGenericConfig>::Pcs as Pcs<
-    //     <SC as StarkGenericConfig>::Challenge,
-    //     <SC as StarkGenericConfig>::Challenger,
-    // >>::Domain,
-    // challenger: &mut SC::Challenger,
     air: &A,
-    // committed_data: Option<&mut State<SC>>,
     state: State<SC>,
 ) -> Proof<SC>
 where
