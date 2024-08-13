@@ -89,55 +89,47 @@ where
         challenger.observe(proving_key.preprocessed_commit.clone())
     };
     // commitments to main trace
-    let committed_data = State::new(pcs, trace_domain, challenger, log_degree);
-    let stage_zero = Stage {
-        trace: main_trace,
-        public_values,
+    let mut state = State::new(pcs, trace_domain, challenger, log_degree);
+    let initial_stage = Stage {
+        trace: Some(main_trace),
+        public_values: Some(public_values),
+        referenced_challenges: None,
+        stage_idx: 0,
     };
 
-    let state = run_stage(committed_data, stage_zero);
+    state.run_stage(initial_stage, next_stage_trace_callback);
 
-    challenges
+    let stages = challenges
         .into_iter()
         .enumerate()
-        .for_each(|(stage, stage_challenges)| {
-            let challenge_values = stage_challenges
-                .iter()
-                .map(|id| {
-                    let challenge: SC::Challenge = challenger.sample();
-                    (*id, challenge)
-                })
-                .collect::<BTreeMap<u64, SC::Challenge>>();
+        .map(|(stage_idx, stage_challenges)| Stage {
+            trace: None,
+            public_values: None,
+            referenced_challenges: Some(stage_challenges),
+            stage_idx: stage_idx as u32 + 1,
+        })
+        .collect::<Vec<Stage<SC>>>();
 
-            // calculating next stage trace
-            let next_stage_trace = next_stage_trace_callback
-                .unwrap()
-                .get_next_stage_trace(stage as u32, challenge_values); // callback to generate trace, this has to store
+    // let next_stage = challenge_values
+    //     .values()
+    //     .cloned()
+    //     .collect::<Vec<SC::Challenge>>();
 
-            let incoming_stage_data = committed_data = run_stage(state, stage);
-        });
+    // // calculating next stage trace
+    // let next_stage_trace = next_stage_trace_callback
+    //     .unwrap()
+    //     .get_next_stage_trace(stage_idx as u32, challenge_values); // callback to generate trace, this has to store
 
-    finish(proving_key, air, state)
-}
+    // let incoming_stage_data = committed_data = run_stage(state, stage);
 
-pub fn run_stage<'a, SC>(state: State<'a, SC>, stage: Stage<SC>) -> State<'a, SC>
-where
-    SC: StarkGenericConfig,
-{
-    let pcs = state.get_pcs();
-    let trace_domain = state.get_trace_domain();
-    let (trace_commit, trace_data) = info_span!("commit to trace data")
-        .in_scope(|| pcs.commit(vec![(trace_domain, stage.trace)]));
-
-    let challenger = state.get_challenger();
-    challenger.observe(trace_commit.clone());
-    challenger.observe_slice(stage.public_values);
-
-    let mut new_state = State::from(state);
-    new_state.trace_commits.push(trace_commit);
-
-    new_state.update_from_stage(stage);
-    new_state
+    finish(
+        proving_key,
+        air,
+        stages.into_iter().fold(state, |mut state, next_stage| {
+            state.run_stage(next_stage, next_stage_trace_callback);
+            state
+        }),
+    )
 }
 
 #[instrument(skip_all)]
@@ -160,7 +152,7 @@ pub fn finish<
     state: State<SC>,
 ) -> Proof<SC>
 where
-    SC: StarkGenericConfig + p3_commit::PolynomialSpace,
+    SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
 {
     // #[cfg(debug_assertions)]
