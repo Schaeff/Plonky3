@@ -129,7 +129,7 @@ pub fn finish<
 >(
     proving_key: Option<&StarkProvingKey<SC>>,
     air: &A,
-    state: State<SC>,
+    mut state: State<SC>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
@@ -144,7 +144,6 @@ where
     //     public_values,
     // );
 
-    // changes for challenges
     let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
         air,
         state // the total length of public values and challenges
@@ -152,118 +151,29 @@ where
             .iter()
             .fold(0, |length, vals| length + vals.len()),
     );
+
     let quotient_degree = 1 << log_quotient_degree;
-    let challenger = state.get_challenger();
 
-    let alpha: SC::Challenge = challenger.sample_ext_element();
+    let quotient_values = quotient_values(air, proving_key, log_quotient_degree, &state);
 
-    let trace_domain = state.get_trace_domain();
-    let log_degree = state.get_log_degree();
-    let pcs = state.get_pcs();
+    let (quotient_commit, quotient_data) =
+        state.commit_to_quotient(quotient_values, log_quotient_degree);
 
-    let quotient_domain =
-        trace_domain.create_disjoint_domain(1 << (log_degree + log_quotient_degree));
-
-    let preprocessed_on_quotient_domain = proving_key.map(|proving_key| {
-        pcs.get_evaluations_on_domain(&proving_key.preprocessed_data, 0, quotient_domain)
-    });
-
-    let traces_on_quotient_domain = state.trace_commits.map(|committed_data| {
-        committed_data
-            .traces
-            .iter()
-            .map(|trace| pcs.get_evaluations_on_domain(trace, 0, quotient_domain))
-            .collect()
-    });
-    // let permutation_on_quotient_domain =
-    //     pcs.get_evaluations_on_domain(&permutation_trace, 0, quotient_domain);
-    let public_values = match committed_data {
-        Some(data) => data.public_values, // needs to be flattened
-        _ => Vec::new(),
-    };
-
-    let quotient_values = quotient_values(
-        air,
-        public_values,
-        trace_domain,
-        quotient_domain,
-        preprocessed_on_quotient_domain,
-        traces_on_quotient_domain,
-        alpha,
-    );
-
-    let quotient_flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
-    let quotient_chunks = quotient_domain.split_evals(quotient_degree, quotient_flat);
-    let qc_domains = quotient_domain.split_domains(quotient_degree);
-
-    let (quotient_commit, quotient_data) = info_span!("commit to quotient poly chunks")
-        .in_scope(|| pcs.commit(izip!(qc_domains, quotient_chunks).collect_vec()));
-    challenger.observe(quotient_commit.clone());
+    // build the commitments
 
     let commitments = Commitments {
-        trace: trace_commit,
+        trace: state.trace_commits.clone(),
         quotient_chunks: quotient_commit,
     };
 
-    let zeta: SC::Challenge = challenger.sample();
-    let zeta_next = trace_domain.next_point(zeta).unwrap();
+    let (opened_values, opening_proof) =
+        state.get_open_proof(proving_key, quotient_data, log_quotient_degree);
 
-    let (opened_values, opening_proof) = pcs.open(
-        iter::empty()
-            .chain(
-                proving_key
-                    .map(|proving_key| {
-                        (&proving_key.preprocessed_data, vec![vec![zeta, zeta_next]])
-                    })
-                    .into_iter(),
-            )
-            .chain([
-                (&trace_data, vec![vec![zeta, zeta_next]]),
-                (
-                    &quotient_data,
-                    // open every chunk at zeta
-                    (0..quotient_degree).map(|_| vec![zeta]).collect_vec(),
-                ),
-            ])
-            .collect_vec(),
-        challenger,
-    );
-    let mut opened_values = opened_values.iter();
-
-    // maybe get values for the preprocessed columns
-    let (preprocessed_local, preprocessed_next) = if proving_key.is_some() {
-        let value = opened_values.next().unwrap();
-        assert_eq!(value.len(), 1);
-        assert_eq!(value[0].len(), 2);
-        (value[0][0].clone(), value[0][1].clone())
-    } else {
-        (vec![], vec![])
-    };
-
-    // get values for the trace
-    let value = opened_values.next().unwrap();
-    assert_eq!(value.len(), 1);
-    assert_eq!(value[0].len(), 2);
-    let trace_local = value[0][0].clone();
-    let trace_next = value[0][1].clone();
-
-    // get values for the quotient
-    let value = opened_values.next().unwrap();
-    assert_eq!(value.len(), quotient_degree);
-    let quotient_chunks = value.iter().map(|v| v[0].clone()).collect_vec();
-
-    let opened_values = OpenedValues {
-        trace_local,
-        trace_next,
-        preprocessed_local,
-        preprocessed_next,
-        quotient_chunks,
-    };
     Proof {
         commitments,
         opened_values,
         opening_proof,
-        degree_bits: log_degree,
+        degree_bits: state.get_log_degree(),
     }
 }
 
@@ -271,18 +181,30 @@ where
 #[instrument(name = "compute quotient polynomial", skip_all)]
 fn quotient_values<SC, A, Mat>(
     air: &A,
-    public_values: &Vec<Val<SC>>,
-    trace_domain: Domain<SC>,
-    quotient_domain: Domain<SC>,
-    preprocessed_on_quotient_domain: Option<Mat>,
-    traces_on_quotient_domain: Vec<Mat>,
-    alpha: SC::Challenge,
+    proving_key: Option<&StarkProvingKey<SC>>,
+    log_quotient_degree: usize,
+    state: &State<SC>,
+    // public_values: Vec<&Vec<Val<SC>>>, // should contain publics from all stages
+    // trace_domain: Domain<SC>,
+    // quotient_domain: Domain<SC>,
+    // preprocessed_on_quotient_domain: Option<Mat>,
+    // traces_on_quotient_domain: Vec<Mat>,
+    // alpha: SC::Challenge,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
     A: for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    Mat: Matrix<Val<SC>> + Sync,
+    // Mat: Matrix<Val<SC>> + Sync,
 {
+    let (
+        alpha,
+        quotient_domain,
+        preprocessed_on_quotient_domain,
+        traces_on_quotient_domain,
+        trace_domain,
+        public_values,
+    ) = state.quotient_inputs(proving_key, log_quotient_degree);
+
     let quotient_size = quotient_domain.size();
     let preprocessed_width = preprocessed_on_quotient_domain
         .as_ref()
@@ -350,7 +272,7 @@ where
             let mut folder = ProverConstraintFolder {
                 stages,
                 preprocessed,
-                public_values,
+                public_values, // TODO: modify prover constraint folder
                 is_first_row,
                 is_last_row,
                 is_transition,

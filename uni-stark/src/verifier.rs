@@ -87,7 +87,11 @@ where
     if let Some(verifying_key) = verifying_key {
         challenger.observe(verifying_key.preprocessed_commit.clone())
     };
-    challenger.observe(commitments.trace.clone());
+    commitments
+        .trace
+        .iter()
+        .map(|commitment| challenger.observe(commitment.clone()));
+    // challenger.observe(commitments.trace.clone());
     challenger.observe_slice(public_values);
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
@@ -113,26 +117,32 @@ where
                     })
                     .into_iter(),
             )
-            .chain([
-                (
-                    commitments.trace.clone(),
-                    vec![(
-                        trace_domain,
-                        vec![
-                            (zeta, opened_values.trace_local.clone()),
-                            (zeta_next, opened_values.trace_next.clone()),
-                        ],
-                    )],
-                ),
-                (
-                    commitments.quotient_chunks.clone(),
-                    quotient_chunks_domains
-                        .iter()
-                        .zip(&opened_values.quotient_chunks)
-                        .map(|(domain, values)| (*domain, vec![(zeta, values.clone())]))
-                        .collect_vec(),
-                ),
-            ])
+            .chain(
+                commitments
+                    .trace
+                    .iter()
+                    .map(|trace_commit| {
+                        (
+                            trace_commit.clone(),
+                            vec![(
+                                trace_domain,
+                                vec![
+                                    (zeta, opened_values.trace_local.clone()),
+                                    (zeta_next, opened_values.trace_next.clone()),
+                                ],
+                            )],
+                        )
+                    })
+                    .collect_vec(),
+            )
+            .chain([(
+                commitments.quotient_chunks.clone(),
+                quotient_chunks_domains
+                    .iter()
+                    .zip(&opened_values.quotient_chunks)
+                    .map(|(domain, values)| (*domain, vec![(zeta, values.clone())]))
+                    .collect_vec(),
+            )])
             .collect_vec(),
         opening_proof,
         challenger,
