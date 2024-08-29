@@ -111,7 +111,7 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
     }
 
     /// Get inputs to quotient calculation
-    pub(crate) fn quotient_inputs(
+    pub(crate) fn quotient_inputs<Mat>(
         &'a mut self,
         proving_key: Option<&'a StarkProvingKey<SC>>,
         log_quotient_degree: usize,
