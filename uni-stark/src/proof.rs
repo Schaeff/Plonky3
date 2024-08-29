@@ -111,16 +111,15 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
     }
 
     /// Get inputs to quotient calculation
-    pub(crate) fn quotient_inputs<Mat>(
-        &'a mut self,
-        proving_key: Option<&'a StarkProvingKey<SC>>,
+    pub(crate) fn quotient_inputs(
+        &mut self,
         log_quotient_degree: usize,
     ) -> (
         Vec<&'a Vec<Val<SC>>>,
         Domain<SC>,
         Domain<SC>,
-        Option<impl Matrix<Val<SC>> + 'a>,
-        Vec<impl Matrix<Val<SC>> + 'a>,
+        // Option<impl Matrix<Val<SC>> + 'a>,
+        // Vec<impl Matrix<Val<SC>> + 'a>,
         SC::Challenge,
     ) {
         let alpha: SC::Challenge = self.challenger.sample_ext_element();
@@ -129,28 +128,20 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
             .trace_domain
             .create_disjoint_domain(1 << (self.log_degree + log_quotient_degree));
 
-        let preprocessed_on_quotient_domain = proving_key.map(|proving_key| {
-            self.pcs
-                .get_evaluations_on_domain(&proving_key.preprocessed_data, 0, quotient_domain)
-        });
-
-        let traces_on_quotient_domain = self
-            .traces
-            .iter()
-            .map(|trace_data| {
-                self.pcs
-                    .get_evaluations_on_domain(trace_data, 0, quotient_domain)
-            })
-            .collect();
-
         (
             self.public_values.clone(),
             self.trace_domain,
             quotient_domain,
-            preprocessed_on_quotient_domain,
-            traces_on_quotient_domain,
             alpha,
         )
+    }
+
+    pub(crate) fn on_quotient_domain(
+        &self,
+        data: &'a PcsProverData<SC>,
+        quotient_domain: Domain<SC>,
+    ) -> impl Matrix<Val<SC>> + 'a {
+        self.pcs.get_evaluations_on_domain(data, 0, quotient_domain)
     }
 
     pub(crate) fn commit_to_quotient(
@@ -276,9 +267,6 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
         self.traces.push(trace_data);
         self.trace_commits.push(trace_commit);
     }
-
-    // public values are a reference to something external-- what
-    // would happen if we just had ownership over them ? ok whatever
 }
 
 pub struct Stage<'a, SC: StarkGenericConfig> {
@@ -290,6 +278,7 @@ pub struct Stage<'a, SC: StarkGenericConfig> {
 
 impl<'a, SC: StarkGenericConfig> Stage<'a, SC> {
     pub(crate) fn get_challenge_values_from_challenger<T>(
+        // honestly let's just try to fix this now
         &mut self,
         challenger: &mut SC::Challenger, // TODO: wrap this challenger
         next_stage_trace_callback: Option<T>,
@@ -300,10 +289,10 @@ impl<'a, SC: StarkGenericConfig> Stage<'a, SC> {
             challenge_id
                 .iter()
                 .map(|id| {
-                    let challenge: Val<SC> = challenger.sample();
+                    let challenge: [Val<SC>; 2] = challenger.sample_array(); // for gl, should change for other fields
                     (*id, challenge)
                 })
-                .collect::<BTreeMap<u64, Val<SC>>>()
+                .collect::<BTreeMap<u64, [Val<SC>; 2]>>()
         });
 
         self.trace = Some(next_stage_trace_callback.unwrap().get_next_stage_trace(
@@ -317,7 +306,7 @@ impl<'a, SC: StarkGenericConfig> Stage<'a, SC> {
             .collect::<Vec<Val<SC>>>();
 
         if !challenge_values.is_empty() {
-            self.public_values = Some(&challenge_values)
+            self.public_values = Some(&challenge_values) // how do you expose these as publics?
         };
     }
 }
@@ -326,6 +315,6 @@ pub trait NextStageTraceCallback<SC: StarkGenericConfig, T> {
     fn get_next_stage_trace(
         &self,
         trace_stage: u32,
-        challenges: &BTreeMap<u64, Val<SC>>,
+        challenges: &BTreeMap<u64, [Val<SC>; 2]>,
     ) -> RowMajorMatrix<T>;
 }

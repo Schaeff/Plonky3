@@ -149,14 +149,18 @@ where
             .fold(0, |length, vals| length + vals.len()),
     );
 
-    let (
-        public_values,
-        trace_domain,
-        quotient_domain,
-        preprocessed_on_quotient_domain,
-        traces_on_quotient_domain,
-        alpha,
-    ) = state.quotient_inputs(proving_key, log_quotient_degree);
+    let (public_values, trace_domain, quotient_domain, alpha) =
+        state.quotient_inputs(log_quotient_degree);
+
+    let preprocessed_on_quotient_domain = proving_key.map(|proving_key| {
+        state.on_quotient_domain(&proving_key.preprocessed_data, quotient_domain)
+    });
+
+    let traces_on_quotient_domain = state
+        .traces
+        .iter()
+        .map(|trace_data| state.on_quotient_domain(&trace_data, quotient_domain))
+        .collect();
 
     let quotient_values = quotient_values(
         air,
