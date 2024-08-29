@@ -22,7 +22,7 @@ pub fn verify<SC, A>(
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
-    public_values: &Vec<Val<SC>>,
+    public_values: Vec<&Vec<Val<SC>>>,
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
@@ -38,7 +38,7 @@ pub fn verify_with_key<SC, A>(
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
-    public_values: &Vec<Val<SC>>,
+    public_values: Vec<&Vec<Val<SC>>>,
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
@@ -51,7 +51,13 @@ where
         degree_bits,
     } = proof;
     let degree = 1 << degree_bits;
-    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(air, public_values.len());
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+        air,
+        public_values
+            .iter()
+            .fold(0, |length, vals| length + vals.len()),
+    );
+
     let quotient_degree = 1 << log_quotient_degree;
     let stages = proof.commitments.stages.len();
 
@@ -61,7 +67,7 @@ where
         trace_domain.create_disjoint_domain(1 << (degree_bits + log_quotient_degree));
     let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
-    let air_width = <A as BaseAir<Val<SC>>>::width(air);
+    // let air_width = <A as BaseAir<Val<SC>>>::width(air);
     let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
     let air_widths = (0..stages)
         .map(|stage| <A as BaseAir<Val<SC>>>::multi_stage_width(air, stage as u32))
@@ -103,7 +109,9 @@ where
         .iter()
         .map(|commitment| challenger.observe(commitment.clone()));
     // challenger.observe(commitments.trace.clone());
-    challenger.observe_slice(public_values);
+    public_values
+        .iter()
+        .map(|publics_for_stage| challenger.observe_slice(publics_for_stage));
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
 
