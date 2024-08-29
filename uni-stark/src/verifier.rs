@@ -2,7 +2,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::iter;
 
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
@@ -68,8 +68,16 @@ where
         .collect::<Vec<usize>>();
     let valid_shape = opened_values.preprocessed_local.len() == air_fixed_width
         && opened_values.preprocessed_next.len() == air_fixed_width
-        && opened_values.stages_local.iter().zip(air_widths.iter()).all(|(stage, air_width)| stage.len() == *air_width)
-        && opened_values.stages_next.iter().zip(air_widths.iter()).all(|(stage, air_width)| stage.len() == *air_width)
+        && opened_values
+            .stages_local
+            .iter()
+            .zip(air_widths.iter())
+            .all(|(stage, air_width)| stage.len() == *air_width)
+        && opened_values
+            .stages_next
+            .iter()
+            .zip(air_widths.iter())
+            .all(|(stage, air_width)| stage.len() == *air_width)
         && opened_values.quotient_chunks.len() == quotient_degree
         && opened_values
             .quotient_chunks
@@ -121,23 +129,24 @@ where
                     .into_iter(),
             )
             .chain(
-                commitments
-                    .stages
-                    .iter()
-                    .zip(&opened_values.stages_local.iter().zip(&opened_values.stages_next.iter()))
-                    .map(|(trace_commit, (opened_local, opened_next))| {
-                        (
-                            trace_commit.clone(),
-                            vec![(
-                                trace_domain,
-                                vec![
-                                    (zeta, opened_local.clone()),
-                                    (zeta_next, opened_next.clone()),
-                                ],
-                            )],
-                        )
-                    })
-                    .collect_vec(),
+                izip!(
+                    commitments.stages.iter(),
+                    opened_values.stages_local.iter(),
+                    opened_values.stages_next.iter()
+                )
+                .map(|(trace_commit, opened_local, opened_next)| {
+                    (
+                        trace_commit.clone(),
+                        vec![(
+                            trace_domain,
+                            vec![
+                                (zeta, opened_local.clone()),
+                                (zeta_next, opened_next.clone()),
+                            ],
+                        )],
+                    )
+                })
+                .collect_vec(),
             )
             .chain([(
                 commitments.quotient_chunks.clone(),
@@ -188,10 +197,17 @@ where
         RowMajorMatrixView::new_row(&opened_values.preprocessed_next),
     );
 
-    let stages = opened_values.stages_local.iter().zip(opened_values.stages_next.iter()).map(|(trace_local, trace_next)| VerticalPair::new(
-        RowMajorMatrixView::new_row(trace_local),
-        RowMajorMatrixView::new_row(trace_next),
-    )).collect::<Vec<VerticalPair<_, _>>>();
+    let stages = opened_values
+        .stages_local
+        .iter()
+        .zip(opened_values.stages_next.iter())
+        .map(|(trace_local, trace_next)| {
+            VerticalPair::new(
+                RowMajorMatrixView::new_row(trace_local),
+                RowMajorMatrixView::new_row(trace_next),
+            )
+        })
+        .collect::<Vec<VerticalPair<_, _>>>();
 
     let mut folder = VerifierConstraintFolder {
         preprocessed,
