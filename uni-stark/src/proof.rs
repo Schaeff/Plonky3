@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use core::iter;
 
 use itertools::{izip, Itertools};
-use p3_air::Air;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_matrix::dense::RowMajorMatrix;
@@ -38,7 +37,7 @@ pub struct Proof<SC: StarkGenericConfig> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Commitments<Com> {
-    pub(crate) trace: Vec<Com>, // we need to fix this
+    pub(crate) stages: Vec<Com>, // we need to fix this
     pub(crate) quotient_chunks: Com,
 }
 
@@ -46,8 +45,8 @@ pub struct Commitments<Com> {
 pub struct OpenedValues<Challenge> {
     pub(crate) preprocessed_local: Vec<Challenge>,
     pub(crate) preprocessed_next: Vec<Challenge>,
-    pub(crate) trace_local: Vec<Challenge>,
-    pub(crate) trace_next: Vec<Challenge>,
+    pub(crate) stages_local: Vec<Vec<Challenge>>,
+    pub(crate) stages_next: Vec<Vec<Challenge>>,
     pub(crate) quotient_chunks: Vec<Vec<Challenge>>,
 }
 
@@ -94,6 +93,10 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
         self.log_degree
     }
 
+    pub(crate) fn get_trace_commits(&self) -> Vec<Com<SC>> {
+        self.trace_commits.clone()
+    }
+
     /// Observe a commitment.
     pub(crate) fn observe_commit(
         &mut self,
@@ -113,12 +116,12 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
         proving_key: Option<&'a StarkProvingKey<SC>>,
         log_quotient_degree: usize,
     ) -> (
-        SC::Challenge,
+        Vec<&'a Vec<Val<SC>>>,
+        Domain<SC>,
         Domain<SC>,
         Option<impl Matrix<Val<SC>> + 'a>,
         Vec<impl Matrix<Val<SC>> + 'a>,
-        Domain<SC>,
-        Vec<&'a Vec<Val<SC>>>,
+        SC::Challenge,
     ) {
         let alpha: SC::Challenge = self.challenger.sample_ext_element();
 
@@ -141,12 +144,12 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
             .collect();
 
         (
-            alpha,
+            self.public_values.clone(),
+            self.trace_domain,
             quotient_domain,
             preprocessed_on_quotient_domain,
             traces_on_quotient_domain,
-            self.trace_domain,
-            self.public_values,
+            alpha,
         )
     }
 
@@ -184,7 +187,7 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
         log_quotient_degree: usize,
     ) -> (OpenedValues<SC::Challenge>, PcsProof<SC>) {
         let quotient_degree = 1 << log_quotient_degree;
-        let zeta: SC::Challenge = self.challenger.sample();
+        let zeta: SC::Challenge = self.challenger.sample(); // ? what
         let zeta_next = self.trace_domain.next_point(zeta).unwrap();
 
         let (opened_values, opening_proof) = self.pcs.open(
@@ -222,13 +225,17 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
             (vec![], vec![])
         };
 
-        // TODO: fix this
-
-        let value = opened_values.next().unwrap();
-        assert_eq!(value.len(), 1);
-        assert_eq!(value[0].len(), 2);
-        let trace_local = value[0][0].clone();
-        let trace_next = value[0][1].clone();
+        // get values for traces
+        let (stages_local, stages_next): (Vec<Vec<SC::Challenge>>, Vec<Vec<SC::Challenge>>) = self
+            .traces
+            .iter()
+            .map(|_| {
+                let value = opened_values.next().unwrap();
+                assert_eq!(value.len(), 1);
+                assert_eq!(value[0].len(), 2);
+                (value[0][0].clone(), value[0][1].clone())
+            })
+            .unzip();
 
         // get values for the quotient
         let value = opened_values.next().unwrap();
@@ -236,8 +243,8 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
         let quotient_chunks = value.iter().map(|v| v[0].clone()).collect_vec();
 
         let opened_values = OpenedValues {
-            trace_local,
-            trace_next,
+            stages_local,
+            stages_next,
             preprocessed_local,
             preprocessed_next,
             quotient_chunks,
@@ -250,11 +257,14 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
     pub(crate) fn run_stage<T>(
         &mut self,
         mut stage: Stage<'a, SC>,
-        next_stage_trace_callback: Option<&'a T>,
+        next_stage_trace_callback: Option<T>, // theoretically, all of the challenges should be held herefirst
     ) where
-        T: NextStageTraceCallback<SC, Val<SC>>,
+        T: NextStageTraceCallback<SC, Val<SC>> + Clone,
     {
-        stage.get_challenge_values_from_challenger(self.challenger, next_stage_trace_callback); // fills in new trace, publics
+        stage.get_challenge_values_from_challenger(
+            self.challenger,
+            next_stage_trace_callback.clone(),
+        ); // fills in new trace, publics
 
         let (trace_commit, trace_data) = info_span!("commit to trace data").in_scope(|| {
             self.pcs
@@ -266,12 +276,15 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
         self.traces.push(trace_data);
         self.trace_commits.push(trace_commit);
     }
+
+    // public values are a reference to something external-- what
+    // would happen if we just had ownership over them ? ok whatever
 }
 
 pub struct Stage<'a, SC: StarkGenericConfig> {
     pub(crate) trace: Option<RowMajorMatrix<Val<SC>>>,
     pub(crate) public_values: Option<&'a Vec<Val<SC>>>,
-    pub(crate) referenced_challenges: Option<Vec<u64>>,
+    pub(crate) referenced_challenges: Option<&'a Vec<u64>>,
     pub(crate) stage_idx: u32,
 }
 
@@ -279,36 +292,33 @@ impl<'a, SC: StarkGenericConfig> Stage<'a, SC> {
     pub(crate) fn get_challenge_values_from_challenger<T>(
         &mut self,
         challenger: &mut SC::Challenger, // TODO: wrap this challenger
-        next_stage_trace_callback: Option<&'a T>,
+        next_stage_trace_callback: Option<T>,
     ) where
-        T: NextStageTraceCallback<SC, Val<SC>>,
+        T: NextStageTraceCallback<SC, Val<SC>> + Clone,
     {
-        let challenge_values = match &self.referenced_challenges {
-            None => BTreeMap::new(),
-            Some(challenge_id) => challenge_id
+        let challenges = self.referenced_challenges.map(|challenge_id| {
+            challenge_id
                 .iter()
                 .map(|id| {
-                    let challenge: SC::Challenge = challenger.sample(); // change this so it becomes a val
+                    let challenge: Val<SC> = challenger.sample();
                     (*id, challenge)
                 })
-                .collect::<BTreeMap<u64, SC::Challenge>>(),
+                .collect::<BTreeMap<u64, Val<SC>>>()
+        });
+
+        self.trace = Some(next_stage_trace_callback.unwrap().get_next_stage_trace(
+            self.stage_idx,
+            challenges.as_ref().unwrap_or(&BTreeMap::new()),
+        ));
+
+        let challenge_values = challenges
+            .unwrap_or(BTreeMap::new())
+            .into_values()
+            .collect::<Vec<Val<SC>>>();
+
+        if !challenge_values.is_empty() {
+            self.public_values = Some(&challenge_values)
         };
-
-        self.trace = Some(
-            next_stage_trace_callback
-                .unwrap()
-                .get_next_stage_trace(self.stage_idx, challenge_values),
-        );
-
-        let challenge_values = challenge_values
-            .values()
-            .cloned()
-            .collect::<Vec<SC::Challenge>>();
-
-        self.public_values = match self.public_values {
-            Some(publics) => Some(publics),
-            None => Some(&challenge_values),
-        }
     }
 }
 
@@ -316,6 +326,6 @@ pub trait NextStageTraceCallback<SC: StarkGenericConfig, T> {
     fn get_next_stage_trace(
         &self,
         trace_stage: u32,
-        challenge_values: BTreeMap<u64, SC::Challenge>,
+        challenges: &BTreeMap<u64, Val<SC>>,
     ) -> RowMajorMatrix<T>;
 }

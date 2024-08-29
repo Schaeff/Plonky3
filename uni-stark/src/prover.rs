@@ -1,9 +1,7 @@
-use alloc::collections::BTreeMap;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::iter;
 
-use itertools::{izip, Itertools};
+use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
@@ -12,11 +10,11 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
-use tracing::{info_span, instrument};
+use tracing::{instrument};
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::{
-    Commitments, Domain, NextStageTraceCallback, OpenedValues, PackedChallenge, PackedVal, Proof,
+    Commitments, Domain, NextStageTraceCallback, PackedChallenge, PackedVal, Proof,
     ProverConstraintFolder, Stage, StarkGenericConfig, StarkProvingKey, State, Val,
 };
 
@@ -33,13 +31,13 @@ pub fn prove<
     challenger: &mut SC::Challenger,
     challenges: Vec<Vec<u64>>,
     main_trace: RowMajorMatrix<Val<SC>>,
-    next_stage_trace_callback: Option<&T>,
+    next_stage_trace_callback: Option<T>,
     public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    T: NextStageTraceCallback<SC, Val<SC>>,
+    T: NextStageTraceCallback<SC, Val<SC>> + Clone,
 {
     prove_with_key(
         config,
@@ -67,13 +65,13 @@ pub fn prove_with_key<
     challenger: &mut SC::Challenger,
     challenges: Vec<Vec<u64>>,
     main_trace: RowMajorMatrix<Val<SC>>,
-    next_stage_trace_callback: Option<&T>,
+    next_stage_trace_callback: Option<T>,
     public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    T: NextStageTraceCallback<SC, Val<SC>>,
+    T: NextStageTraceCallback<SC, Val<SC>> + Clone,
 {
     let degree = main_trace.height();
     let log_degree = log2_strict_usize(degree);
@@ -93,14 +91,14 @@ where
     let initial_stage = Stage {
         trace: Some(main_trace),
         public_values: Some(public_values),
-        referenced_challenges: None,
+        referenced_challenges: None, // we should
         stage_idx: 0,
     };
 
-    state.run_stage(initial_stage, next_stage_trace_callback);
+    state.run_stage(initial_stage, next_stage_trace_callback.clone());
 
     let stages = challenges
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(stage_idx, stage_challenges)| Stage {
             trace: None,
@@ -114,7 +112,7 @@ where
         proving_key,
         air,
         stages.into_iter().fold(state, |mut state, next_stage| {
-            state.run_stage(next_stage, next_stage_trace_callback);
+            state.run_stage(next_stage, next_stage_trace_callback.clone());
             state
         }),
     )
@@ -152,9 +150,24 @@ where
             .fold(0, |length, vals| length + vals.len()),
     );
 
-    let quotient_degree = 1 << log_quotient_degree;
+    let (
+        public_values,
+        trace_domain,
+        quotient_domain,
+        preprocessed_on_quotient_domain,
+        traces_on_quotient_domain,
+        alpha,
+    ) = state.quotient_inputs(proving_key, log_quotient_degree);
 
-    let quotient_values = quotient_values(air, proving_key, log_quotient_degree, &state);
+    let quotient_values = quotient_values(
+        air,
+        public_values,
+        trace_domain,
+        quotient_domain,
+        preprocessed_on_quotient_domain,
+        traces_on_quotient_domain,
+        alpha,
+    );
 
     let (quotient_commit, quotient_data) =
         state.commit_to_quotient(quotient_values, log_quotient_degree);
@@ -162,7 +175,7 @@ where
     // build the commitments
 
     let commitments = Commitments {
-        trace: state.trace_commits.clone(),
+        stages: state.get_trace_commits(),
         quotient_chunks: quotient_commit,
     };
 
@@ -179,31 +192,31 @@ where
 
 // TODO: finish
 #[instrument(name = "compute quotient polynomial", skip_all)]
-fn quotient_values<SC, A, Mat>(
+fn quotient_values<'a, SC, A, Mat>(
     air: &A,
-    proving_key: Option<&StarkProvingKey<SC>>,
-    log_quotient_degree: usize,
-    state: &State<SC>,
-    // public_values: Vec<&Vec<Val<SC>>>, // should contain publics from all stages
-    // trace_domain: Domain<SC>,
-    // quotient_domain: Domain<SC>,
-    // preprocessed_on_quotient_domain: Option<Mat>,
-    // traces_on_quotient_domain: Vec<Mat>,
-    // alpha: SC::Challenge,
+    // proving_key: Option<&'a StarkProvingKey<SC>>,
+    // log_quotient_degree: usize,
+    // mut state: State<'a, SC>,
+    public_values: Vec<&'a Vec<Val<SC>>>, // should contain publics from all stages
+    trace_domain: Domain<SC>,
+    quotient_domain: Domain<SC>,
+    preprocessed_on_quotient_domain: Option<Mat>,
+    traces_on_quotient_domain: Vec<Mat>,
+    alpha: SC::Challenge,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
-    A: for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    // Mat: Matrix<Val<SC>> + Sync,
+    A: Air<ProverConstraintFolder<'a, SC>>,
+    Mat: Matrix<Val<SC>> + Sync,
 {
-    let (
-        alpha,
-        quotient_domain,
-        preprocessed_on_quotient_domain,
-        traces_on_quotient_domain,
-        trace_domain,
-        public_values,
-    ) = state.quotient_inputs(proving_key, log_quotient_degree);
+    // let (
+    //     alpha,
+    //     quotient_domain,
+    //     preprocessed_on_quotient_domain,
+    //     traces_on_quotient_domain,
+    //     trace_domain,
+    //     public_values,
+    // ) = state.quotient_inputs(proving_key, log_quotient_degree);
 
     let quotient_size = quotient_domain.size();
     let preprocessed_width = preprocessed_on_quotient_domain
@@ -272,7 +285,7 @@ where
             let mut folder = ProverConstraintFolder {
                 stages,
                 preprocessed,
-                public_values, // TODO: modify prover constraint folder
+                public_values: public_values.clone(), // TODO: modify prover constraint folder
                 is_first_row,
                 is_last_row,
                 is_transition,

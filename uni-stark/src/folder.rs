@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
+use p3_air::{AirBuilder, AirBuilderWithPublicValues, MultistageAirBuilder, PairBuilder};
 use p3_field::AbstractField;
 use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 use p3_matrix::stack::VerticalPair;
@@ -11,7 +11,7 @@ use crate::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub stages: Vec<RowMajorMatrix<PackedVal<SC>>>,
     pub preprocessed: RowMajorMatrix<PackedVal<SC>>,
-    pub public_values: &'a Vec<Val<SC>>,
+    pub public_values: Vec<&'a Vec<Val<SC>>>,
     pub is_first_row: PackedVal<SC>,
     pub is_last_row: PackedVal<SC>,
     pub is_transition: PackedVal<SC>,
@@ -23,9 +23,9 @@ type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixVie
 
 #[derive(Debug)]
 pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
-    pub main: ViewPair<'a, SC::Challenge>,
+    pub stages: Vec<ViewPair<'a, SC::Challenge>>,
     pub preprocessed: ViewPair<'a, SC::Challenge>,
-    pub public_values: &'a Vec<Val<SC>>,
+    pub public_values: Vec<&'a Vec<Val<SC>>>,
     pub is_first_row: SC::Challenge,
     pub is_last_row: SC::Challenge,
     pub is_transition: SC::Challenge,
@@ -70,7 +70,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraint
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
-        self.public_values
+        self.public_values[0]
     }
 }
 
@@ -80,6 +80,8 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'a, SC> 
     }
 }
 
+// TODO: implementation for next_stage matrices
+
 impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC> {
     type F = Val<SC>;
     type Expr = SC::Challenge;
@@ -87,7 +89,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC>
     type M = ViewPair<'a, SC::Challenge>;
 
     fn main(&self) -> Self::M {
-        self.main
+        self.stages[0].clone()
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -117,12 +119,23 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstrai
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
-        self.public_values
+        self.public_values[0]
     }
 }
 
 impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed
+    }
+}
+
+impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for ProverConstraintFolder<'a, SC> {
+    type ChallengeVar = Self::F;
+    fn multi_stage(&self, stage: usize) -> Self::M {
+        self.stages[stage].clone()
+    }
+
+    fn challenges(&self, stage: usize) -> &[Self::ChallengeVar] {
+        self.public_values[stage]
     }
 }
