@@ -80,7 +80,16 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'a, SC> 
     }
 }
 
-// TODO: implementation for next_stage matrices
+impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for ProverConstraintFolder<'a, SC> {
+    type ChallengeVar = Self::F;
+    fn multi_stage(&self, stage: usize) -> Self::M {
+        self.stages[stage].clone()
+    }
+
+    fn challenges(&self, stage: usize) -> &[Self::ChallengeVar] {
+        self.public_values[stage]
+    }
+}
 
 impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC> {
     type F = Val<SC>;
@@ -129,7 +138,7 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC
     }
 }
 
-impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for ProverConstraintFolder<'a, SC> {
+impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for VerifierConstraintFolder<'a, SC> {
     type ChallengeVar = Self::F;
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage].clone()
