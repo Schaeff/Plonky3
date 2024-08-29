@@ -131,8 +131,8 @@ where
                             vec![(
                                 trace_domain,
                                 vec![
-                                    (zeta, *opened_local.clone()),
-                                    (zeta_next, *opened_next.clone()),
+                                    (zeta, opened_local.clone()),
+                                    (zeta_next, opened_next.clone()),
                                 ],
                             )],
                         )
