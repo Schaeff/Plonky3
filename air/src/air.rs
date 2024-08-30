@@ -22,6 +22,10 @@ pub trait BaseAir<F>: Sync {
     fn multi_stage_width(&self, _stage: u32) -> usize {
         0
     }
+
+    fn get_challenge_ids(&self) -> &[&[u64]] {
+        &[&[]]
+    }
 }
 
 /// An AIR that works with a particular `AirBuilder`.

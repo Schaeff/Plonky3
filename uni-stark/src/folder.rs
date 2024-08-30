@@ -98,7 +98,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC>
     type M = ViewPair<'a, SC::Challenge>;
 
     fn main(&self) -> Self::M {
-        self.stages[0].clone()
+        self.stages[0]
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -141,7 +141,7 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC
 impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for VerifierConstraintFolder<'a, SC> {
     type ChallengeVar = Self::F;
     fn multi_stage(&self, stage: usize) -> Self::M {
-        self.stages[stage].clone()
+        self.stages[stage]
     }
 
     fn challenges(&self, stage: usize) -> &[Self::ChallengeVar] {

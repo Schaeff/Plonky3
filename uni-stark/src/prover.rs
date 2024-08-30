@@ -3,7 +3,7 @@ use core::iter;
 
 use itertools::Itertools;
 use p3_air::Air;
-use p3_challenger::{CanObserve, CanSample, FieldChallenger};
+use p3_challenger::CanObserve;
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
 use p3_matrix::dense::RowMajorMatrix;
@@ -14,9 +14,22 @@ use tracing::instrument;
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::{
-    Commitments, Domain, NextStageTraceCallback, PackedChallenge, PackedVal, Proof,
-    ProverConstraintFolder, Stage, StarkGenericConfig, StarkProvingKey, State, Val,
+    Commitments, NextStageTraceCallback, PackedChallenge, PackedVal, Proof, ProverConstraintFolder,
+    QuotientInputs, Stage, StarkGenericConfig, StarkProvingKey, State, Val,
 };
+
+#[derive(Clone)]
+struct Panic;
+
+impl<SC: StarkGenericConfig> NextStageTraceCallback<SC> for Panic {
+    fn get_next_stage_trace(
+        &self,
+        _: u32,
+        _: &alloc::collections::btree_map::BTreeMap<u64, Val<SC>>,
+    ) -> RowMajorMatrix<Val<SC>> {
+        panic!()
+    }
+}
 
 #[instrument(skip_all)]
 #[allow(clippy::multiple_bound_locations)] // cfg not supported in where clauses?
@@ -24,7 +37,6 @@ pub fn prove<
     SC,
     #[cfg(debug_assertions)] A: for<'a> Air<crate::check_constraints::DebugConstraintBuilder<'a, Val<SC>>>,
     #[cfg(not(debug_assertions))] A,
-    T,
 >(
     config: &SC,
     air: &A,
@@ -35,14 +47,12 @@ pub fn prove<
 where
     SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    T: NextStageTraceCallback<SC, Val<SC>> + Clone,
 {
-    prove_with_key::<SC, A, T>(
+    prove_with_key::<_, _, Panic>(
         config,
         None,
         air,
         challenger,
-        Vec::new(),
         main_trace,
         None,
         public_values,
@@ -61,16 +71,16 @@ pub fn prove_with_key<
     proving_key: Option<&StarkProvingKey<SC>>,
     air: &A,
     challenger: &mut SC::Challenger,
-    challenges: Vec<Vec<u64>>,
     main_trace: RowMajorMatrix<Val<SC>>,
-    next_stage_trace_callback: Option<T>,
+    next_stage_trace_callback: Option<&T>,
     public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    T: NextStageTraceCallback<SC, Val<SC>> + Clone,
+    T: NextStageTraceCallback<SC>,
 {
+    let challenges: Vec<Vec<u64>> = air.get_challenge_ids().iter().map(|i| i.to_vec()).collect();
     let degree = main_trace.height();
     let log_degree = log2_strict_usize(degree);
 
@@ -93,7 +103,7 @@ where
         stage_idx: 0,
     };
 
-    state.run_stage(initial_stage, next_stage_trace_callback.clone());
+    state.run_stage(initial_stage, next_stage_trace_callback);
 
     let stages = challenges
         .iter()
@@ -110,7 +120,7 @@ where
         proving_key,
         air,
         stages.into_iter().fold(state, |mut state, next_stage| {
-            state.run_stage(next_stage, next_stage_trace_callback.clone());
+            state.run_stage(next_stage, next_stage_trace_callback);
             state
         }),
     )
@@ -148,27 +158,26 @@ where
             .fold(0, |length, vals| length + vals.len()),
     );
 
-    let (public_values, trace_domain, quotient_domain, alpha) =
-        state.quotient_inputs(log_quotient_degree);
+    let quotient_inputs = state.quotient_inputs(log_quotient_degree);
 
     let preprocessed_on_quotient_domain = proving_key.map(|proving_key| {
-        state.on_quotient_domain(&proving_key.preprocessed_data, quotient_domain)
+        state.on_quotient_domain(
+            &proving_key.preprocessed_data,
+            quotient_inputs.quotient_domain,
+        )
     });
 
     let traces_on_quotient_domain = state
         .traces
         .iter()
-        .map(|trace_data| state.on_quotient_domain(&trace_data, quotient_domain))
+        .map(|trace_data| state.on_quotient_domain(trace_data, quotient_inputs.quotient_domain))
         .collect();
 
     let quotient_values = quotient_values(
         air,
-        public_values,
-        trace_domain,
-        quotient_domain,
         preprocessed_on_quotient_domain,
         traces_on_quotient_domain,
-        alpha,
+        quotient_inputs,
     );
 
     let (quotient_commit, quotient_data) =
@@ -196,29 +205,21 @@ where
 #[instrument(name = "compute quotient polynomial", skip_all)]
 fn quotient_values<'a, SC, A, Mat>(
     air: &A,
-    // proving_key: Option<&'a StarkProvingKey<SC>>,
-    // log_quotient_degree: usize,
-    // mut state: State<'a, SC>,
-    public_values: Vec<&'a Vec<Val<SC>>>, // should contain publics from all stages
-    trace_domain: Domain<SC>,
-    quotient_domain: Domain<SC>,
     preprocessed_on_quotient_domain: Option<Mat>,
     traces_on_quotient_domain: Vec<Mat>,
-    alpha: SC::Challenge,
+    quotient_inputs: QuotientInputs<'a, SC>,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
     A: Air<ProverConstraintFolder<'a, SC>>,
     Mat: Matrix<Val<SC>> + Sync,
 {
-    // let (
-    //     alpha,
-    //     quotient_domain,
-    //     preprocessed_on_quotient_domain,
-    //     traces_on_quotient_domain,
-    //     trace_domain,
-    //     public_values,
-    // ) = state.quotient_inputs(proving_key, log_quotient_degree);
+    let QuotientInputs {
+        public_values,
+        quotient_domain,
+        trace_domain,
+        alpha,
+    } = quotient_inputs;
 
     let quotient_size = quotient_domain.size();
     let preprocessed_width = preprocessed_on_quotient_domain
