@@ -30,7 +30,6 @@ pub fn prove<
     air: &A,
     challenger: &mut SC::Challenger,
     main_trace: RowMajorMatrix<Val<SC>>,
-    next_stage_trace_callback: Option<T>,
     public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
@@ -38,14 +37,14 @@ where
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
     T: NextStageTraceCallback<SC, Val<SC>> + Clone,
 {
-    prove_with_key(
+    prove_with_key::<SC, A, T>(
         config,
         None,
         air,
         challenger,
         Vec::new(),
         main_trace,
-        next_stage_trace_callback,
+        None,
         public_values,
     )
 }

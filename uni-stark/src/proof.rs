@@ -289,10 +289,10 @@ impl<'a, SC: StarkGenericConfig> Stage<'a, SC> {
             challenge_id
                 .iter()
                 .map(|id| {
-                    let challenge: [Val<SC>; 2] = challenger.sample_array(); // for gl, should change for other fields
+                    let challenge: Val<SC> = challenger.sample(); // for gl, should change for other fields
                     (*id, challenge)
                 })
-                .collect::<BTreeMap<u64, [Val<SC>; 2]>>()
+                .collect::<BTreeMap<u64, Val<SC>>>()
         });
 
         self.trace = Some(next_stage_trace_callback.unwrap().get_next_stage_trace(
@@ -315,6 +315,6 @@ pub trait NextStageTraceCallback<SC: StarkGenericConfig, T> {
     fn get_next_stage_trace(
         &self,
         trace_stage: u32,
-        challenges: &BTreeMap<u64, [Val<SC>; 2]>,
+        challenges: &BTreeMap<u64, Val<SC>>,
     ) -> RowMajorMatrix<T>;
 }
