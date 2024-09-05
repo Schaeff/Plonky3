@@ -138,7 +138,7 @@ impl<F: Field> AirBuilder for SymbolicAirBuilder<F> {
     type M = RowMajorMatrix<Self::Var>;
 
     fn main(&self) -> Self::M {
-        unreachable!()
+        self.stages[0].clone()
     }
 
     fn is_first_row(&self) -> Self::Expr {
