@@ -13,6 +13,10 @@ pub trait BaseAir<F>: Sync {
         None
     }
 
+    fn stage_count(&self) -> usize {
+        1
+    }
+
     /// The number of preprocessed columns in this AIR
     fn preprocessed_width(&self) -> usize {
         0
