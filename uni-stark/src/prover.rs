@@ -126,6 +126,8 @@ where
         state = state.run_stage(stage);
     }
 
+    assert_eq!(state.processed_stages.len(), air.stage_count());
+
     finish(proving_key, air, state)
 }
 
@@ -202,7 +204,6 @@ where
     }
 }
 
-// TODO: finish
 #[instrument(name = "compute quotient polynomial", skip_all)]
 fn quotient_values<'a, SC, A, Mat>(
     air: &A,
@@ -227,10 +228,6 @@ where
         .as_ref()
         .map(Matrix::width)
         .unwrap_or_default();
-    let widths = traces_on_quotient_domain
-        .iter()
-        .map(|trace| trace.width())
-        .collect::<Vec<usize>>();
     let mut sels = trace_domain.selectors_on_coset(quotient_domain);
 
     let qdb = log2_strict_usize(quotient_domain.size()) - log2_strict_usize(trace_domain.size());
@@ -271,8 +268,7 @@ where
 
             let stages = traces_on_quotient_domain
                 .iter()
-                .zip(widths.iter())
-                .map(|(trace_on_quotient_domain, width)| {
+                .map(|trace_on_quotient_domain| {
                     RowMajorMatrix::new(
                         iter::empty()
                             .chain(trace_on_quotient_domain.vertically_packed_row(i_start))
@@ -280,7 +276,7 @@ where
                                 trace_on_quotient_domain.vertically_packed_row(i_start + next_step),
                             )
                             .collect_vec(),
-                        *width,
+                        trace_on_quotient_domain.width(),
                     )
                 })
                 .collect::<Vec<RowMajorMatrix<PackedVal<SC>>>>();
@@ -289,7 +285,7 @@ where
             let mut folder = ProverConstraintFolder {
                 stages,
                 preprocessed,
-                public_values: public_values.clone(), // TODO: modify prover constraint folder
+                public_values: public_values.clone(),
                 is_first_row,
                 is_last_row,
                 is_transition,
