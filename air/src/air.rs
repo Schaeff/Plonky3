@@ -23,8 +23,8 @@ pub trait BaseAir<F>: Sync {
         0
     }
 
-    fn get_challenge_ids(&self) -> &[&[u64]] {
-        &[&[]]
+    fn required_challenge_count(&self, _stage: u32) -> usize {
+        0
     }
 }
 

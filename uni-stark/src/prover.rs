@@ -22,11 +22,7 @@ use crate::{
 struct Panic;
 
 impl<SC: StarkGenericConfig> NextStageTraceCallback<SC> for Panic {
-    fn get_next_stage_trace(
-        &self,
-        _: u32,
-        _: &alloc::collections::btree_map::BTreeMap<u64, Val<SC>>,
-    ) -> RowMajorMatrix<Val<SC>> {
+    fn get_next_stage_trace(&self, _: u32, _: &[Val<SC>]) -> RowMajorMatrix<Val<SC>> {
         panic!()
     }
 }
@@ -71,17 +67,16 @@ pub fn prove_with_key<
     proving_key: Option<&StarkProvingKey<SC>>,
     air: &A,
     challenger: &mut SC::Challenger,
-    main_trace: RowMajorMatrix<Val<SC>>,
+    stage_0_trace: RowMajorMatrix<Val<SC>>,
     next_stage_trace_callback: Option<&T>,
-    public_values: &Vec<Val<SC>>,
+    stage_0_public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
     T: NextStageTraceCallback<SC>,
 {
-    let challenges: Vec<Vec<u64>> = air.get_challenge_ids().iter().map(|i| i.to_vec()).collect();
-    let degree = main_trace.height();
+    let degree = stage_0_trace.height();
     let log_degree = log2_strict_usize(degree);
 
     let pcs = config.pcs();
@@ -90,40 +85,48 @@ where
     // Observe the instance
     challenger.observe(Val::<SC>::from_canonical_usize(log_degree));
     // TODO: Might be best practice to include other instance data here; see verifier comment.
-
     if let Some(proving_key) = proving_key {
         challenger.observe(proving_key.preprocessed_commit.clone())
     };
+
     // commitments to main trace
-    let mut state = State::new(pcs, trace_domain, challenger, log_degree);
+    let state = State::new(
+        pcs,
+        trace_domain,
+        challenger,
+        log_degree,
+        stage_0_public_values,
+    );
     let initial_stage = Stage {
-        trace: Some(main_trace),
-        public_values: Some(public_values),
-        referenced_challenges: None, // we should
-        stage_idx: 0,
+        trace: stage_0_trace,
+        challenge_count: air.required_challenge_count(1),
     };
 
-    state.run_stage(initial_stage, next_stage_trace_callback);
+    let mut state = state.run_stage(initial_stage);
 
-    let stages = challenges
-        .iter()
-        .enumerate()
-        .map(|(stage_idx, stage_challenges)| Stage {
-            trace: None,
-            public_values: None,
-            referenced_challenges: Some(stage_challenges),
-            stage_idx: stage_idx as u32 + 1,
-        })
-        .collect::<Vec<Stage<SC>>>();
+    while !state
+        .processed_stages
+        .last()
+        .unwrap()
+        .challenge_values
+        .is_empty()
+    {
+        let last_processed_stage = state.processed_stages.last().unwrap();
+        let trace = next_stage_trace_callback
+            .as_ref()
+            .expect("witgen callback expected in the presence of challenges")
+            .get_next_stage_trace(
+                state.stage_id() as u32,
+                &last_processed_stage.challenge_values,
+            );
+        let stage = Stage {
+            trace,
+            challenge_count: air.required_challenge_count(state.stage_id() + 1),
+        };
+        state = state.run_stage(stage);
+    }
 
-    finish(
-        proving_key,
-        air,
-        stages.into_iter().fold(state, |mut state, next_stage| {
-            state.run_stage(next_stage, next_stage_trace_callback);
-            state
-        }),
-    )
+    finish(proving_key, air, state)
 }
 
 #[instrument(skip_all)]
@@ -150,13 +153,7 @@ where
     //     public_values,
     // );
 
-    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-        air,
-        state // the total length of public values and challenges
-            .public_values
-            .iter()
-            .fold(0, |length, vals| length + vals.len()),
-    );
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(air, state.public_values.len());
 
     let quotient_inputs = state.quotient_inputs(log_quotient_degree);
 
@@ -168,9 +165,9 @@ where
     });
 
     let traces_on_quotient_domain = state
-        .traces
+        .processed_stages
         .iter()
-        .map(|trace_data| state.on_quotient_domain(trace_data, quotient_inputs.quotient_domain))
+        .map(|s| state.on_quotient_domain(&s.prover_data, quotient_inputs.quotient_domain))
         .collect();
 
     let quotient_values = quotient_values(
@@ -186,7 +183,11 @@ where
     // build the commitments
 
     let commitments = Commitments {
-        stages: state.get_trace_commits(),
+        stages: state
+            .processed_stages
+            .iter()
+            .map(|s| s.commitment.clone())
+            .collect(),
         quotient_chunks: quotient_commit,
     };
 
