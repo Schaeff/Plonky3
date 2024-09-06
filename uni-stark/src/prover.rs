@@ -78,6 +78,7 @@ where
 {
     let degree = stage_0_trace.height();
     let log_degree = log2_strict_usize(degree);
+    let stage_count = air.stage_count();
 
     let pcs = config.pcs();
     let trace_domain = pcs.natural_domain_for_degree(degree);
@@ -90,43 +91,44 @@ where
     };
 
     // commitments to main trace
-    let state = State::new(
+    let mut state = State::new(
         pcs,
         trace_domain,
         challenger,
         log_degree,
         stage_0_public_values,
     );
-    let initial_stage = Stage {
+    let mut stage = Stage {
         trace: stage_0_trace,
         challenge_count: air.required_challenge_count(1),
     };
 
-    let mut state = state.run_stage(initial_stage);
-
-    while !state
-        .processed_stages
-        .last()
-        .unwrap()
-        .challenge_values
-        .is_empty()
-    {
+    assert!(stage_count >= 1);
+    // for all stages except the last one, generate the next stage based on the witgen callback
+    for stage_id in 0..stage_count - 1 {
+        state = state.run_stage(stage);
         let last_processed_stage = state.processed_stages.last().unwrap();
         let trace = next_stage_trace_callback
             .as_ref()
             .expect("witgen callback expected in the presence of challenges")
-            .get_next_stage_trace(
-                state.stage_id() as u32,
-                &last_processed_stage.challenge_values,
-            );
-        let stage = Stage {
+            .get_next_stage_trace(stage_id as u32, &last_processed_stage.challenge_values);
+        stage = Stage {
             trace,
-            challenge_count: air.required_challenge_count(state.stage_id() + 1),
+            challenge_count: air.required_challenge_count(stage_id as u32 + 1),
         };
-        state = state.run_stage(stage);
     }
 
-    assert_eq!(state.processed_stages.len(), air.stage_count());
+    state = state.run_stage(stage);
+
+    // sanity check that the last stage did not create any challenges
+    assert!(state
+        .processed_stages
+        .last()
+        .unwrap()
+        .challenge_values
+        .is_empty());
+    // sanity check that we processed as many stages as expected
+    assert_eq!(state.processed_stages.len(), stage_count);
 
     finish(proving_key, air, state)
 }

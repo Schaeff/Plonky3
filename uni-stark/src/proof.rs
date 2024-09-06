@@ -101,10 +101,6 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
         }
     }
 
-    pub fn stage_id(&self) -> u32 {
-        self.processed_stages.len() as u32
-    }
-
     pub(crate) fn get_log_degree(&self) -> usize {
         self.log_degree
     }
