@@ -9,6 +9,7 @@ use crate::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
 #[derive(Debug)]
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
+    pub challenges: Vec<Vec<PackedVal<SC>>>,
     pub stages: Vec<RowMajorMatrix<PackedVal<SC>>>,
     pub preprocessed: RowMajorMatrix<PackedVal<SC>>,
     pub public_values: Vec<&'a Vec<Val<SC>>>,
@@ -23,6 +24,7 @@ type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixVie
 
 #[derive(Debug)]
 pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
+    pub challenges: Vec<Vec<SC::Challenge>>,
     pub stages: Vec<ViewPair<'a, SC::Challenge>>,
     pub preprocessed: ViewPair<'a, SC::Challenge>,
     pub public_values: Vec<&'a Vec<Val<SC>>>,
@@ -81,13 +83,12 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'a, SC> 
 }
 
 impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for ProverConstraintFolder<'a, SC> {
-    type ChallengeVar = Self::F;
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage].clone()
     }
 
-    fn challenges(&self, stage: usize) -> &[Self::ChallengeVar] {
-        self.public_values[stage]
+    fn challenges(&self, stage: usize) -> &[Self::Expr] {
+        &self.challenges[stage]
     }
 }
 
@@ -139,12 +140,11 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC
 }
 
 impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for VerifierConstraintFolder<'a, SC> {
-    type ChallengeVar = Self::F;
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage]
     }
 
-    fn challenges(&self, stage: usize) -> &[Self::ChallengeVar] {
-        self.public_values[stage]
+    fn challenges(&self, stage: usize) -> &[Self::Expr] {
+        &self.challenges[stage]
     }
 }

@@ -16,6 +16,7 @@ pub(crate) fn check_constraints<F, A>(
     preprocessed: &RowMajorMatrix<F>,
     stages: Vec<&RowMajorMatrix<F>>,
     public_values: Vec<&Vec<F>>,
+    challenges: Vec<&Vec<F>>,
 ) where
     F: Field,
     A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
@@ -53,6 +54,7 @@ pub(crate) fn check_constraints<F, A>(
 
         let mut builder = DebugConstraintBuilder {
             row_index: i,
+            challenges: challenges.clone(),
             preprocessed,
             stages,
             public_values: public_values.clone(),
@@ -71,6 +73,7 @@ pub(crate) fn check_constraints<F, A>(
 pub struct DebugConstraintBuilder<'a, F: Field> {
     row_index: usize,
     preprocessed: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
+    challenges: Vec<&'a Vec<F>>,
     stages: Vec<VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>>,
     public_values: Vec<&'a Vec<F>>,
     is_first_row: F,
@@ -142,13 +145,11 @@ impl<'a, F: Field> PairBuilder for DebugConstraintBuilder<'a, F> {
 }
 
 impl<'a, F: Field> MultistageAirBuilder for DebugConstraintBuilder<'a, F> {
-    type ChallengeVar = Self::F;
-
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage]
     }
 
-    fn challenges(&self, stage: usize) -> &[Self::ChallengeVar] {
-        self.public_values[stage] // return a slice of public values?
+    fn challenges(&self, stage: usize) -> &[Self::Expr] {
+        &self.challenges[stage]
     }
 }

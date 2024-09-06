@@ -217,7 +217,10 @@ where
         })
         .collect::<Vec<VerticalPair<_, _>>>();
 
+    let challenges = unimplemented!();
+
     let mut folder = VerifierConstraintFolder {
+        challenges,
         preprocessed,
         stages,
         public_values,

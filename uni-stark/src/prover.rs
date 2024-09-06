@@ -174,10 +174,17 @@ where
         .map(|s| state.on_quotient_domain(&s.prover_data, quotient_inputs.quotient_domain))
         .collect();
 
+    let challenges = state
+        .processed_stages
+        .iter()
+        .map(|stage| stage.challenge_values.clone())
+        .collect();
+
     let quotient_values = quotient_values(
         air,
         preprocessed_on_quotient_domain,
         traces_on_quotient_domain,
+        challenges,
         quotient_inputs,
     );
 
@@ -211,6 +218,7 @@ fn quotient_values<'a, SC, A, Mat>(
     air: &A,
     preprocessed_on_quotient_domain: Option<Mat>,
     traces_on_quotient_domain: Vec<Mat>,
+    challenges: Vec<Vec<Val<SC>>>,
     quotient_inputs: QuotientInputs<'a, SC>,
 ) -> Vec<SC::Challenge>
 where
@@ -243,6 +251,11 @@ where
         sels.is_transition.push(Val::<SC>::default());
         sels.inv_zeroifier.push(Val::<SC>::default());
     }
+
+    let challenges: Vec<Vec<_>> = challenges
+        .into_iter()
+        .map(|s| s.into_iter().map(|v| v.into()).collect())
+        .collect();
 
     (0..quotient_size)
         .into_par_iter()
@@ -285,6 +298,7 @@ where
 
             let accumulator = PackedChallenge::<SC>::zero();
             let mut folder = ProverConstraintFolder {
+                challenges: challenges.clone(),
                 stages,
                 preprocessed,
                 public_values: public_values.clone(),
