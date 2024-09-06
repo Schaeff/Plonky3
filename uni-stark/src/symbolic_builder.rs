@@ -52,7 +52,7 @@ where
         .map(|i| air.multi_stage_width(i as u32))
         .collect();
     let challenges: Vec<_> = (0..air.stage_count())
-        .map(|i| air.required_challenge_count(i as u32))
+        .map(|i| air.challenge_count(i as u32))
         .collect();
     let mut builder = SymbolicAirBuilder::new(
         air.preprocessed_width(),

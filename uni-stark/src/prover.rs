@@ -100,7 +100,7 @@ where
     );
     let mut stage = Stage {
         trace: stage_0_trace,
-        challenge_count: air.required_challenge_count(1),
+        challenge_count: air.challenge_count(0),
     };
 
     assert!(stage_count >= 1);
@@ -114,7 +114,7 @@ where
             .get_next_stage_trace(stage_id as u32, &last_processed_stage.challenge_values);
         stage = Stage {
             trace,
-            challenge_count: air.required_challenge_count(stage_id as u32 + 1),
+            challenge_count: air.challenge_count(stage_id as u32 + 1),
         };
     }
 

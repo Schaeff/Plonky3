@@ -27,7 +27,8 @@ pub trait BaseAir<F>: Sync {
         0
     }
 
-    fn required_challenge_count(&self, _stage: u32) -> usize {
+    /// The number of challenges produced at the end of each stage
+    fn challenge_count(&self, _stage: u32) -> usize {
         0
     }
 }
