@@ -14,16 +14,16 @@ use tracing::instrument;
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::{
-    Commitments, NextStageTraceCallback, PackedChallenge, PackedVal, Proof, ProverConstraintFolder,
-    QuotientInputs, Stage, StarkGenericConfig, StarkProvingKey, State, Val,
+    CallbackResult, Commitments, NextStageTraceCallback, PackedChallenge, PackedVal, Proof,
+    ProverConstraintFolder, QuotientInputs, Stage, StarkGenericConfig, StarkProvingKey, State, Val,
 };
 
 #[derive(Clone)]
 struct Panic;
 
 impl<SC: StarkGenericConfig> NextStageTraceCallback<SC> for Panic {
-    fn get_next_stage_trace(&self, _: u32, _: &[Val<SC>]) -> RowMajorMatrix<Val<SC>> {
-        panic!()
+    fn get_next_stage(&self, _: u32, _: &[Val<SC>]) -> CallbackResult<Val<SC>> {
+        unreachable!()
     }
 }
 
@@ -91,16 +91,11 @@ where
     };
 
     // commitments to main trace
-    let mut state = State::new(
-        pcs,
-        trace_domain,
-        challenger,
-        log_degree,
-        stage_0_public_values,
-    );
+    let mut state = State::new(pcs, trace_domain, challenger, log_degree);
     let mut stage = Stage {
         trace: stage_0_trace,
         challenge_count: air.challenge_count(0),
+        public_values: stage_0_public_values.clone(),
     };
 
     assert!(stage_count >= 1);
@@ -108,13 +103,17 @@ where
     for stage_id in 0..stage_count - 1 {
         state = state.run_stage(stage);
         let last_processed_stage = state.processed_stages.last().unwrap();
-        let trace = next_stage_trace_callback
+        let CallbackResult {
+            trace,
+            public_values,
+        } = next_stage_trace_callback
             .as_ref()
             .expect("witgen callback expected in the presence of challenges")
-            .get_next_stage_trace(stage_id as u32, &last_processed_stage.challenge_values);
+            .get_next_stage(stage_id as u32, &last_processed_stage.challenge_values);
         stage = Stage {
             trace,
             challenge_count: air.challenge_count(stage_id as u32 + 1),
+            public_values,
         };
     }
 
@@ -148,16 +147,14 @@ where
     SC: StarkGenericConfig,
     A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
 {
-    // #[cfg(debug_assertions)]
-    // crate::check_constraints::check_constraints(
-    //     air,
-    //     &air.preprocessed_trace()
-    //         .unwrap_or(RowMajorMatrix::new(vec![], 0)),
-    //     &trace,
-    //     public_values,
-    // );
-
-    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(air, state.public_values.len());
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+        air,
+        &state
+            .processed_stages
+            .iter()
+            .map(|s| s.public_values.len())
+            .collect::<Vec<_>>(),
+    );
 
     let quotient_inputs = state.quotient_inputs(log_quotient_degree);
 
@@ -180,11 +177,18 @@ where
         .map(|stage| stage.challenge_values.clone())
         .collect();
 
+    let public_values = state
+        .processed_stages
+        .iter()
+        .map(|stage| stage.public_values.clone())
+        .collect();
+
     let quotient_values = quotient_values(
         air,
         preprocessed_on_quotient_domain,
         traces_on_quotient_domain,
         challenges,
+        &public_values,
         quotient_inputs,
     );
 
@@ -210,6 +214,11 @@ where
         opened_values,
         opening_proof,
         degree_bits: state.get_log_degree(),
+        challenge_counts: state
+            .processed_stages
+            .iter()
+            .map(|s| s.challenge_values.len())
+            .collect(),
     }
 }
 
@@ -219,7 +228,8 @@ fn quotient_values<'a, SC, A, Mat>(
     preprocessed_on_quotient_domain: Option<Mat>,
     traces_on_quotient_domain: Vec<Mat>,
     challenges: Vec<Vec<Val<SC>>>,
-    quotient_inputs: QuotientInputs<'a, SC>,
+    public_values: &'a Vec<Vec<Val<SC>>>,
+    quotient_inputs: QuotientInputs<SC>,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
@@ -227,7 +237,6 @@ where
     Mat: Matrix<Val<SC>> + Sync,
 {
     let QuotientInputs {
-        public_values,
         quotient_domain,
         trace_domain,
         alpha,
@@ -301,7 +310,7 @@ where
                 challenges: challenges.clone(),
                 stages,
                 preprocessed,
-                public_values: public_values.clone(),
+                public_values,
                 is_first_row,
                 is_last_row,
                 is_transition,

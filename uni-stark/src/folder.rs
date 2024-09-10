@@ -12,7 +12,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub challenges: Vec<Vec<PackedVal<SC>>>,
     pub stages: Vec<RowMajorMatrix<PackedVal<SC>>>,
     pub preprocessed: RowMajorMatrix<PackedVal<SC>>,
-    pub public_values: Vec<&'a Vec<Val<SC>>>,
+    pub public_values: &'a Vec<Vec<Val<SC>>>,
     pub is_first_row: PackedVal<SC>,
     pub is_last_row: PackedVal<SC>,
     pub is_transition: PackedVal<SC>,
@@ -71,8 +71,8 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
 impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraintFolder<'a, SC> {
     type PublicVar = Self::F;
 
-    fn public_values(&self) -> &[Self::F] {
-        self.public_values[0]
+    fn stage_public_values(&self, stage: usize) -> &[Self::F] {
+        &self.public_values[stage]
     }
 }
 
@@ -128,8 +128,8 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC>
 impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstraintFolder<'a, SC> {
     type PublicVar = Self::F;
 
-    fn public_values(&self) -> &[Self::F] {
-        self.public_values[0]
+    fn stage_public_values(&self, stage: usize) -> &[Self::F] {
+        self.public_values[stage]
     }
 }
 

@@ -135,7 +135,16 @@ pub trait AirBuilder: Sized {
 pub trait AirBuilderWithPublicValues: AirBuilder {
     type PublicVar: Into<Self::Expr> + Copy;
 
-    fn public_values(&self) -> &[Self::PublicVar];
+    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
+        match stage {
+            0 => self.public_values(),
+            _ => unimplemented!(),
+        }
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.stage_public_values(0)
+    }
 }
 
 pub trait PairBuilder: AirBuilder {

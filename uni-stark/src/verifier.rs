@@ -4,7 +4,7 @@ use core::iter;
 
 use itertools::{izip, Itertools};
 use p3_air::{Air, BaseAir};
-use p3_challenger::{CanObserve, FieldChallenger};
+use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, Field};
 use p3_matrix::dense::RowMajorMatrixView;
@@ -49,14 +49,16 @@ where
         opened_values,
         opening_proof,
         degree_bits,
+        challenge_counts,
     } = proof;
 
     let degree = 1 << degree_bits;
     let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
         air,
-        public_values
+        &public_values
             .iter()
-            .fold(0, |length, vals| length + vals.len()),
+            .map(|values| values.len())
+            .collect::<Vec<_>>(),
     );
     let quotient_degree = 1 << log_quotient_degree;
     let stages = proof.commitments.stages.len();
@@ -67,28 +69,29 @@ where
         trace_domain.create_disjoint_domain(1 << (degree_bits + log_quotient_degree));
     let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
-    // let air_width = <A as BaseAir<Val<SC>>>::width(air);
-    let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
     let air_widths = (0..stages)
         .map(|stage| <A as BaseAir<Val<SC>>>::multi_stage_width(air, stage as u32))
         .collect::<Vec<usize>>();
+    let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
     let valid_shape = opened_values.preprocessed_local.len() == air_fixed_width
         && opened_values.preprocessed_next.len() == air_fixed_width
         && opened_values
             .stages_local
             .iter()
-            .zip(air_widths.iter())
+            .zip(&air_widths)
             .all(|(stage, air_width)| stage.len() == *air_width)
         && opened_values
             .stages_next
             .iter()
-            .zip(air_widths.iter())
+            .zip(&air_widths)
             .all(|(stage, air_width)| stage.len() == *air_width)
         && opened_values.quotient_chunks.len() == quotient_degree
         && opened_values
             .quotient_chunks
             .iter()
-            .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D);
+            .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
+        && public_values.len() == stages
+        && challenge_counts.len() == stages;
     if !valid_shape {
         return Err(VerificationError::InvalidProofShape);
     }
@@ -104,13 +107,19 @@ where
     if let Some(verifying_key) = verifying_key {
         challenger.observe(verifying_key.preprocessed_commit.clone())
     };
+
+    let mut challenges = vec![];
+
     commitments
         .stages
         .iter()
-        .for_each(|commitment| challenger.observe(commitment.clone()));
-    public_values
-        .iter()
-        .for_each(|publics_for_stage| challenger.observe_slice(publics_for_stage));
+        .zip(&public_values)
+        .zip(challenge_counts)
+        .for_each(|((commitment, public_values), challenge_count)| {
+            challenger.observe(commitment.clone());
+            challenges.push((0..*challenge_count).map(|_| challenger.sample()).collect());
+            challenger.observe_slice(public_values);
+        });
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
 
@@ -215,8 +224,6 @@ where
             )
         })
         .collect::<Vec<VerticalPair<_, _>>>();
-
-    let challenges = unimplemented!();
 
     let mut folder = VerifierConstraintFolder {
         challenges,
