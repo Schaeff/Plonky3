@@ -262,6 +262,12 @@ pub struct CallbackResult<T> {
     // todo: return shared challenges
 }
 
+impl<T> CallbackResult<T> {
+    pub fn new(trace: RowMajorMatrix<T>, public_values: Vec<T>) -> Self {
+        Self { trace, public_values }
+    }
+}
+
 pub trait NextStageTraceCallback<SC: StarkGenericConfig> {
     fn get_next_stage(&self, trace_stage: u32, challenges: &[Val<SC>]) -> CallbackResult<Val<SC>>;
 }
