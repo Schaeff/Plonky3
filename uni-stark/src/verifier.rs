@@ -108,7 +108,6 @@ where
         .stages
         .iter()
         .for_each(|commitment| challenger.observe(commitment.clone()));
-    // challenger.observe(commitments.trace.clone());
     public_values
         .iter()
         .for_each(|publics_for_stage| challenger.observe_slice(publics_for_stage));

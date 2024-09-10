@@ -23,8 +23,11 @@ pub trait BaseAir<F>: Sync {
     }
 
     /// The number of columns in a given higher-stage trace.
-    fn multi_stage_width(&self, _stage: u32) -> usize {
-        0
+    fn multi_stage_width(&self, stage: u32) -> usize {
+        match stage {
+            0 => self.width(),
+            _ => unimplemented!(),
+        }
     }
 
     /// The number of challenges produced at the end of each stage
