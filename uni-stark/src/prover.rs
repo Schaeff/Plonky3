@@ -1,3 +1,4 @@
+use alloc::borrow::ToOwned;
 use alloc::vec::Vec;
 use core::iter;
 
@@ -22,7 +23,7 @@ use crate::{
 struct Panic;
 
 impl<SC: StarkGenericConfig> NextStageTraceCallback<SC> for Panic {
-    fn get_next_stage(&self, _: u32, _: &[Val<SC>]) -> CallbackResult<Val<SC>> {
+    fn compute_stage(&self, _: u32, _: &[Val<SC>]) -> CallbackResult<Val<SC>> {
         unreachable!()
     }
 }
@@ -69,7 +70,7 @@ pub fn prove_with_key<
     challenger: &mut SC::Challenger,
     stage_0_trace: RowMajorMatrix<Val<SC>>,
     next_stage_trace_callback: Option<&T>,
-    stage_0_public_values: &Vec<Val<SC>>,
+    stage_0_public_values: &[Val<SC>],
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
@@ -95,24 +96,29 @@ where
     let mut stage = Stage {
         trace: stage_0_trace,
         challenge_count: air.challenge_count(0),
-        public_values: stage_0_public_values.clone(),
+        public_values: stage_0_public_values.to_owned(),
     };
 
     assert!(stage_count >= 1);
-    // for all stages except the last one, generate the next stage based on the witgen callback
-    for stage_id in 0..stage_count - 1 {
+    // generate all stages starting from the second one based on the witgen callback
+    for stage_id in 1..stage_count {
         state = state.run_stage(stage);
-        let last_processed_stage = state.processed_stages.last().unwrap();
+        // get the challenges drawn at the end of the previous stage
+        let local_challenges = &state.processed_stages.last().unwrap().challenge_values;
         let CallbackResult {
             trace,
             public_values,
+            challenges,
         } = next_stage_trace_callback
             .as_ref()
             .expect("witgen callback expected in the presence of challenges")
-            .get_next_stage(stage_id as u32, &last_processed_stage.challenge_values);
+            .compute_stage(stage_id as u32, local_challenges);
+        // replace the challenges of the last stage with the ones received
+        state.processed_stages.last_mut().unwrap().challenge_values = challenges;
+        // go to the next stage
         stage = Stage {
             trace,
-            challenge_count: air.challenge_count(stage_id as u32 + 1),
+            challenge_count: air.challenge_count(stage_id as u32),
             public_values,
         };
     }
@@ -135,8 +141,16 @@ where
         &air.preprocessed_trace()
             .unwrap_or(RowMajorMatrix::new(Default::default(), 0)),
         state.processed_stages.iter().map(|s| &s.trace).collect(),
-        &state.processed_stages.iter().map(|s| &s.public_values).collect(),
-        state.processed_stages.iter().map(|s| &s.challenge_values).collect(),
+        &state
+            .processed_stages
+            .iter()
+            .map(|s| &s.public_values)
+            .collect(),
+        state
+            .processed_stages
+            .iter()
+            .map(|s| &s.challenge_values)
+            .collect(),
     );
 
     finish(proving_key, air, state)
@@ -270,11 +284,6 @@ where
         sels.is_transition.push(Val::<SC>::default());
         sels.inv_zeroifier.push(Val::<SC>::default());
     }
-
-    let challenges: Vec<Vec<_>> = challenges
-        .into_iter()
-        .map(|s| s.into_iter().map(|v| v.into()).collect())
-        .collect();
 
     (0..quotient_size)
         .into_par_iter()

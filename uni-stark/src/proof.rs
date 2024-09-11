@@ -226,7 +226,6 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
     }
 
     pub(crate) fn run_stage(mut self, stage: Stage<SC>) -> Self {
-
         #[cfg(debug_assertions)]
         let trace = stage.trace.clone();
 
@@ -265,17 +264,25 @@ pub struct Stage<SC: StarkGenericConfig> {
 }
 
 pub struct CallbackResult<T> {
+    // the trace for this stage
     pub(crate) trace: RowMajorMatrix<T>,
+    // the values of the public inputs of this stage
     pub(crate) public_values: Vec<T>,
-    // todo: return shared challenges
+    // the values of the challenges drawn at the previous stage
+    pub(crate) challenges: Vec<T>,
 }
 
 impl<T> CallbackResult<T> {
-    pub fn new(trace: RowMajorMatrix<T>, public_values: Vec<T>) -> Self {
-        Self { trace, public_values }
+    pub fn new(trace: RowMajorMatrix<T>, public_values: Vec<T>, challenges: Vec<T>) -> Self {
+        Self {
+            trace,
+            public_values,
+            challenges,
+        }
     }
 }
 
 pub trait NextStageTraceCallback<SC: StarkGenericConfig> {
-    fn get_next_stage(&self, trace_stage: u32, challenges: &[Val<SC>]) -> CallbackResult<Val<SC>>;
+    /// Computes the stage number `trace_stage` based on `challenges` drawn at the end of stage `trace_stage - 1`
+    fn compute_stage(&self, stage: u32, challenges: &[Val<SC>]) -> CallbackResult<Val<SC>>;
 }
