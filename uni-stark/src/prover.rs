@@ -129,6 +129,16 @@ where
     // sanity check that we processed as many stages as expected
     assert_eq!(state.processed_stages.len(), stage_count);
 
+    #[cfg(debug_assertions)]
+    crate::check_constraints::check_constraints(
+        air,
+        &air.preprocessed_trace()
+            .unwrap_or(RowMajorMatrix::new(Default::default(), 0)),
+        state.processed_stages.iter().map(|s| &s.trace).collect(),
+        &state.processed_stages.iter().map(|s| &s.public_values).collect(),
+        state.processed_stages.iter().map(|s| &s.challenge_values).collect(),
+    );
+
     finish(proving_key, air, state)
 }
 
@@ -306,6 +316,7 @@ where
                 .collect::<Vec<RowMajorMatrix<PackedVal<SC>>>>();
 
             let accumulator = PackedChallenge::<SC>::zero();
+
             let mut folder = ProverConstraintFolder {
                 challenges: challenges.clone(),
                 stages,

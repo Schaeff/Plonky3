@@ -186,6 +186,8 @@ impl<F: Field> PairBuilder for SymbolicAirBuilder<F> {
 }
 
 impl<F: Field> MultistageAirBuilder for SymbolicAirBuilder<F> {
+    type Challenge = Self::Expr;
+
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage].clone()
     }

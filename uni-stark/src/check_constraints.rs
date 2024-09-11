@@ -143,6 +143,8 @@ impl<'a, F: Field> PairBuilder for DebugConstraintBuilder<'a, F> {
 }
 
 impl<'a, F: Field> MultistageAirBuilder for DebugConstraintBuilder<'a, F> {
+    type Challenge = Self::Expr;
+
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage]
     }

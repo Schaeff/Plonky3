@@ -189,11 +189,13 @@ pub trait PermutationAirBuilder: ExtensionBuilder {
 }
 
 pub trait MultistageAirBuilder: AirBuilder {
+    type Challenge: Clone + Into<Self::Expr>;
+
     /// Traces from each stage.
     fn multi_stage(&self, stage: usize) -> Self::M;
 
     /// Challenges from each stage, drawn from the base field
-    fn challenges(&self, stage: usize) -> &[Self::Expr];
+    fn challenges(&self, stage: usize) -> &[Self::Challenge];
 }
 #[derive(Debug)]
 pub struct FilteredAirBuilder<'a, AB: AirBuilder> {

@@ -65,6 +65,8 @@ pub struct ProcessedStage<SC: StarkGenericConfig> {
     pub(crate) prover_data: PcsProverData<SC>,
     pub(crate) challenge_values: Vec<Val<SC>>,
     pub(crate) public_values: Vec<Val<SC>>,
+    #[cfg(debug_assertions)]
+    pub(crate) trace: RowMajorMatrix<Val<SC>>,
 }
 
 /// Updating with each new trace in every stage
@@ -224,6 +226,10 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
     }
 
     pub(crate) fn run_stage(mut self, stage: Stage<SC>) -> Self {
+
+        #[cfg(debug_assertions)]
+        let trace = stage.trace.clone();
+
         // commit to the trace for this stage
         let (commitment, prover_data) = info_span!("commit to trace data")
             .in_scope(|| self.pcs.commit(vec![(self.trace_domain, stage.trace)]));
@@ -242,6 +248,8 @@ impl<'a, SC: StarkGenericConfig> State<'a, SC> {
             prover_data,
             commitment,
             challenge_values,
+            #[cfg(debug_assertions)]
+            trace,
         });
         self
     }
