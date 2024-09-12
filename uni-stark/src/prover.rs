@@ -40,7 +40,7 @@ pub fn prove<
     air: &A,
     challenger: &mut SC::Challenger,
     main_trace: RowMajorMatrix<Val<SC>>,
-    public_values: &Vec<Val<SC>>,
+    public_values: &[Val<SC>],
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
