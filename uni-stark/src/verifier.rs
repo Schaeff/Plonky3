@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::iter;
 
 use itertools::{izip, Itertools};
-use p3_air::{Air, BaseAir};
+use p3_air::BaseAir;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, Field};
@@ -12,6 +12,7 @@ use p3_matrix::stack::VerticalPair;
 use tracing::instrument;
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
+use crate::traits::MultiStageAir;
 use crate::{
     PcsError, Proof, StarkGenericConfig, StarkVerifyingKey, Val, VerifierConstraintFolder,
 };
@@ -26,7 +27,8 @@ pub fn verify<SC, A>(
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'a> MultiStageAir<VerifierConstraintFolder<'a, SC>>,
 {
     verify_with_key(config, None, air, challenger, proof, vec![public_values])
 }
@@ -42,7 +44,8 @@ pub fn verify_with_key<SC, A>(
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'a> MultiStageAir<VerifierConstraintFolder<'a, SC>>,
 {
     let Proof {
         commitments,
@@ -70,7 +73,9 @@ where
     let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
     let air_widths = (0..stages)
-        .map(|stage| <A as BaseAir<Val<SC>>>::multi_stage_width(air, stage as u32))
+        .map(|stage| {
+            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::multi_stage_width(air, stage as u32)
+        })
         .collect::<Vec<usize>>();
     let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
     let valid_shape = opened_values.preprocessed_local.len() == air_fixed_width

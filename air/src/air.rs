@@ -13,25 +13,8 @@ pub trait BaseAir<F>: Sync {
         None
     }
 
-    fn stage_count(&self) -> usize {
-        1
-    }
-
     /// The number of preprocessed columns in this AIR
     fn preprocessed_width(&self) -> usize {
-        0
-    }
-
-    /// The number of columns in a given higher-stage trace.
-    fn multi_stage_width(&self, stage: u32) -> usize {
-        match stage {
-            0 => self.width(),
-            _ => unimplemented!(),
-        }
-    }
-
-    /// The number of challenges produced at the end of each stage
-    fn challenge_count(&self, _stage: u32) -> usize {
         0
     }
 }
@@ -135,16 +118,7 @@ pub trait AirBuilder: Sized {
 pub trait AirBuilderWithPublicValues: AirBuilder {
     type PublicVar: Into<Self::Expr> + Copy;
 
-    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
-        match stage {
-            0 => self.public_values(),
-            _ => unimplemented!(),
-        }
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.stage_public_values(0)
-    }
+    fn public_values(&self) -> &[Self::PublicVar];
 }
 
 pub trait PairBuilder: AirBuilder {
@@ -188,15 +162,6 @@ pub trait PermutationAirBuilder: ExtensionBuilder {
     fn permutation_randomness(&self) -> &[Self::RandomVar];
 }
 
-pub trait MultistageAirBuilder: AirBuilder {
-    type Challenge: Clone + Into<Self::Expr>;
-
-    /// Traces from each stage.
-    fn multi_stage(&self, stage: usize) -> Self::M;
-
-    /// Challenges from each stage, drawn from the base field
-    fn challenges(&self, stage: usize) -> &[Self::Challenge];
-}
 #[derive(Debug)]
 pub struct FilteredAirBuilder<'a, AB: AirBuilder> {
     pub inner: &'a mut AB,

@@ -1,7 +1,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, MultistageAirBuilder, PairBuilder};
+use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_util::log2_ceil_usize;
@@ -9,13 +9,14 @@ use tracing::instrument;
 
 use crate::symbolic_expression::SymbolicExpression;
 use crate::symbolic_variable::SymbolicVariable;
+use crate::traits::{MultiStageAir, MultistageAirBuilder};
 use crate::Entry;
 
 #[instrument(name = "infer log of constraint degree", skip_all)]
 pub fn get_log_quotient_degree<F, A>(air: &A, public_values_counts: &[usize]) -> usize
 where
     F: Field,
-    A: Air<SymbolicAirBuilder<F>>,
+    A: MultiStageAir<SymbolicAirBuilder<F>>,
 {
     // We pad to at least degree 2, since a quotient argument doesn't make sense with smaller degrees.
     let constraint_degree = get_max_constraint_degree(air, public_values_counts).max(2);
@@ -30,7 +31,7 @@ where
 pub fn get_max_constraint_degree<F, A>(air: &A, public_values_counts: &[usize]) -> usize
 where
     F: Field,
-    A: Air<SymbolicAirBuilder<F>>,
+    A: MultiStageAir<SymbolicAirBuilder<F>>,
 {
     get_symbolic_constraints(air, public_values_counts)
         .iter()
@@ -46,7 +47,7 @@ pub fn get_symbolic_constraints<F, A>(
 ) -> Vec<SymbolicExpression<F>>
 where
     F: Field,
-    A: Air<SymbolicAirBuilder<F>>,
+    A: MultiStageAir<SymbolicAirBuilder<F>>,
 {
     let widths: Vec<_> = (0..air.stage_count())
         .map(|i| air.multi_stage_width(i as u32))
@@ -174,19 +175,18 @@ impl<F: Field> AirBuilder for SymbolicAirBuilder<F> {
 
 impl<F: Field> AirBuilderWithPublicValues for SymbolicAirBuilder<F> {
     type PublicVar = SymbolicVariable<F>;
-    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
-        &self.public_values[stage]
-    }
-}
 
-impl<F: Field> PairBuilder for SymbolicAirBuilder<F> {
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed.clone()
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.stage_public_values(0)
     }
 }
 
 impl<F: Field> MultistageAirBuilder for SymbolicAirBuilder<F> {
     type Challenge = Self::Var;
+
+    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
+        &self.public_values[stage]
+    }
 
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage].clone()
@@ -194,5 +194,11 @@ impl<F: Field> MultistageAirBuilder for SymbolicAirBuilder<F> {
 
     fn challenges(&self, stage: usize) -> &[Self::Challenge] {
         &self.challenges[stage]
+    }
+}
+
+impl<F: Field> PairBuilder for SymbolicAirBuilder<F> {
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed.clone()
     }
 }

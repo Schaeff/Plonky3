@@ -14,6 +14,7 @@ use p3_util::log2_strict_usize;
 use tracing::instrument;
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
+use crate::traits::MultiStageAir;
 use crate::{
     CallbackResult, Commitments, NextStageTraceCallback, PackedChallenge, PackedVal, Proof,
     ProverConstraintFolder, QuotientInputs, Stage, StarkGenericConfig, StarkProvingKey, State, Val,
@@ -43,7 +44,8 @@ pub fn prove<
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'a> MultiStageAir<ProverConstraintFolder<'a, SC>>,
 {
     prove_with_key::<_, _, Panic>(
         config,
@@ -74,12 +76,13 @@ pub fn prove_with_key<
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'a> MultiStageAir<ProverConstraintFolder<'a, SC>>,
     T: NextStageTraceCallback<SC>,
 {
     let degree = stage_0_trace.height();
     let log_degree = log2_strict_usize(degree);
-    let stage_count = air.stage_count();
+    let stage_count = <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_count(air);
 
     let pcs = config.pcs();
     let trace_domain = pcs.natural_domain_for_degree(degree);
@@ -95,7 +98,7 @@ where
     let mut state = State::new(pcs, trace_domain, challenger, log_degree);
     let mut stage = Stage {
         trace: stage_0_trace,
-        challenge_count: air.challenge_count(0),
+        challenge_count: <A as MultiStageAir<SymbolicAirBuilder<_>>>::challenge_count(air, 0),
         public_values: stage_0_public_values.to_owned(),
     };
 
@@ -118,7 +121,10 @@ where
         // go to the next stage
         stage = Stage {
             trace,
-            challenge_count: air.challenge_count(stage_id as u32),
+            challenge_count: <A as MultiStageAir<SymbolicAirBuilder<_>>>::challenge_count(
+                air,
+                stage_id as u32,
+            ),
             public_values,
         };
     }
@@ -169,7 +175,8 @@ pub fn finish<
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'a> MultiStageAir<ProverConstraintFolder<'a, SC>>,
 {
     let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
         air,
