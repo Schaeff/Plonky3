@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
 use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger32};
 use p3_circle::CirclePcs;
@@ -21,7 +21,7 @@ use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{
     CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher32, TruncatedPermutation,
 };
-use p3_uni_stark::{prove, verify, StarkConfig, StarkGenericConfig, Val};
+use p3_uni_stark::{prove, verify, MultiStageAir, StarkConfig, StarkGenericConfig, Val};
 use rand::distributions::{Distribution, Standard};
 use rand::{thread_rng, Rng};
 
@@ -115,6 +115,8 @@ impl<AB: AirBuilder> Air<AB> for MulAir {
         }
     }
 }
+
+impl<AB: AirBuilderWithPublicValues> MultiStageAir<AB> for MulAir {}
 
 fn do_test<SC: StarkGenericConfig>(
     config: SC,

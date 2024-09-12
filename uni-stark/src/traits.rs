@@ -35,5 +35,3 @@ pub trait MultiStageAir<AB: AirBuilder>: Air<AB> {
         0
     }
 }
-
-impl<AB: AirBuilder, A: Air<AB>> MultiStageAir<AB> for A {}

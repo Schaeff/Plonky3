@@ -13,7 +13,7 @@ use p3_matrix::Matrix;
 use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-use p3_uni_stark::{prove, verify, StarkConfig};
+use p3_uni_stark::{prove, verify, MultiStageAir, StarkConfig};
 use rand::thread_rng;
 
 /// For testing the public values feature
@@ -55,6 +55,8 @@ impl<AB: AirBuilderWithPublicValues> Air<AB> for FibonacciAir {
         builder.when_last_row().assert_eq(local.right, x);
     }
 }
+
+impl<AB: AirBuilderWithPublicValues> MultiStageAir<AB> for FibonacciAir {}
 
 pub fn generate_trace_rows<F: PrimeField64>(a: u64, b: u64, n: usize) -> RowMajorMatrix<F> {
     assert!(n.is_power_of_two());

@@ -3,6 +3,7 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::AbstractField;
 use p3_matrix::Matrix;
+use p3_uni_stark::MultiStageAir;
 
 use crate::columns::{KeccakCols, NUM_KECCAK_COLS};
 use crate::constants::rc_value_bit;
@@ -19,6 +20,8 @@ impl<F> BaseAir<F> for KeccakAir {
         NUM_KECCAK_COLS
     }
 }
+
+impl<AB: AirBuilder> MultiStageAir<AB> for KeccakAir {}
 
 impl<AB: AirBuilder> Air<AB> for KeccakAir {
     #[inline]
