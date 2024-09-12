@@ -67,7 +67,7 @@ where
 /// An `AirBuilder` for evaluating constraints symbolically, and recording them for later use.
 #[derive(Debug)]
 pub struct SymbolicAirBuilder<F: Field> {
-    challenges: Vec<Vec<SymbolicExpression<F>>>,
+    challenges: Vec<Vec<SymbolicVariable<F>>>,
     preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
     stages: Vec<RowMajorMatrix<SymbolicVariable<F>>>,
     public_values: Vec<Vec<SymbolicVariable<F>>>,
@@ -109,7 +109,7 @@ impl<F: Field> SymbolicAirBuilder<F> {
                     .map(|_| {
                         let res = SymbolicVariable::new(Entry::Challenge, challenge_index);
                         challenge_index += 1;
-                        res.into()
+                        res
                     })
                     .collect()
             })
@@ -186,13 +186,13 @@ impl<F: Field> PairBuilder for SymbolicAirBuilder<F> {
 }
 
 impl<F: Field> MultistageAirBuilder for SymbolicAirBuilder<F> {
-    type Challenge = Self::Expr;
+    type Challenge = Self::Var;
 
     fn multi_stage(&self, stage: usize) -> Self::M {
         self.stages[stage].clone()
     }
 
-    fn challenges(&self, stage: usize) -> &[Self::Expr] {
+    fn challenges(&self, stage: usize) -> &[Self::Challenge] {
         &self.challenges[stage]
     }
 }
