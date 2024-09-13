@@ -80,7 +80,7 @@ fn main() -> Result<(), impl Debug> {
     let config = MyConfig::new(pcs);
 
     let mut challenger = Challenger::new(perm.clone());
-    let proof = prove(&config, &KeccakAir {}, &mut challenger, trace, &[]);
+    let proof = prove(&config, &KeccakAir {}, &mut challenger, trace, &vec![]);
 
     let mut challenger = Challenger::new(perm);
     verify(&config, &KeccakAir {}, &mut challenger, &proof, &vec![])
