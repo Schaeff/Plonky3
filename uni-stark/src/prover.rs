@@ -306,6 +306,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[instrument(name = "compute quotient polynomial", skip_all)]
 fn quotient_values<'a, SC, A, Mat>(
     air: &A,
