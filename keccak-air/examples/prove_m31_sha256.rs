@@ -71,7 +71,7 @@ fn main() -> Result<(), impl Debug> {
     let trace = generate_trace_rows::<Val>(inputs);
 
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-    let proof = prove(&config, &KeccakAir {}, &mut challenger, trace, &vec![]);
+    let proof = prove(&config, &KeccakAir {}, &mut challenger, trace, &[]);
 
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     verify(&config, &KeccakAir {}, &mut challenger, &proof, &vec![])
