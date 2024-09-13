@@ -17,7 +17,8 @@ use tracing::{info_span, instrument};
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::traits::MultiStageAir;
 use crate::{
-    Commitments, Domain, OpenedValues, PackedChallenge, PackedVal, ProcessedStage, Proof, ProverConstraintFolder, StarkGenericConfig, StarkProvingKey, Val
+    Commitments, Domain, OpenedValues, PackedChallenge, PackedVal, ProcessedStage, Proof,
+    ProverConstraintFolder, StarkGenericConfig, StarkProvingKey, Val,
 };
 
 struct UnusedCallback;
@@ -102,7 +103,7 @@ where
     let mut state: ProverState<SC> = ProverState::new(pcs, trace_domain, challenger);
     let mut stage = Stage {
         trace: stage_0_trace,
-        challenge_count: <A as MultiStageAir<SymbolicAirBuilder<_>>>::challenge_count(air, 0),
+        challenge_count: <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(air, 0),
         public_values: stage_0_public_values.to_owned(),
     };
 
@@ -122,7 +123,7 @@ where
         // go to the next stage
         stage = Stage {
             trace,
-            challenge_count: <A as MultiStageAir<SymbolicAirBuilder<_>>>::challenge_count(
+            challenge_count: <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(
                 air,
                 stage_id as u32,
             ),
@@ -407,7 +408,6 @@ where
         .collect()
 }
 
-/// Updating with each new trace in every stage
 pub struct ProverState<'a, SC: StarkGenericConfig> {
     pub(crate) processed_stages: Vec<ProcessedStage<SC>>,
     pub(crate) challenger: &'a mut SC::Challenger,

@@ -80,11 +80,11 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraint
 impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for ProverConstraintFolder<'a, SC> {
     type Challenge = Val<SC>;
 
-    fn multi_stage(&self, stage: usize) -> <Self as AirBuilder>::M {
+    fn stage_trace(&self, stage: usize) -> <Self as AirBuilder>::M {
         self.stages[stage].clone()
     }
 
-    fn challenges(&self, stage: usize) -> &[Self::Challenge] {
+    fn stage_challenges(&self, stage: usize) -> &[Self::Challenge] {
         &self.challenges[stage]
     }
     fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
@@ -142,11 +142,11 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstrai
 impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for VerifierConstraintFolder<'a, SC> {
     type Challenge = Val<SC>;
 
-    fn multi_stage(&self, stage: usize) -> <Self as AirBuilder>::M {
+    fn stage_trace(&self, stage: usize) -> <Self as AirBuilder>::M {
         self.stages[stage]
     }
 
-    fn challenges(&self, stage: usize) -> &[Self::Challenge] {
+    fn stage_challenges(&self, stage: usize) -> &[Self::Challenge] {
         &self.challenges[stage]
     }
     fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {

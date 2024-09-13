@@ -151,11 +151,11 @@ impl<'a, F: Field> MultistageAirBuilder for DebugConstraintBuilder<'a, F> {
         self.public_values[stage]
     }
 
-    fn multi_stage(&self, stage: usize) -> Self::M {
+    fn stage_trace(&self, stage: usize) -> Self::M {
         self.stages[stage]
     }
 
-    fn challenges(&self, stage: usize) -> &[Self::Expr] {
+    fn stage_challenges(&self, stage: usize) -> &[Self::Expr] {
         self.challenges[stage]
     }
 }

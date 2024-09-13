@@ -74,7 +74,7 @@ where
 
     let air_widths = (0..stages)
         .map(|stage| {
-            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::multi_stage_width(air, stage as u32)
+            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_width(air, stage as u32)
         })
         .collect::<Vec<usize>>();
     let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
