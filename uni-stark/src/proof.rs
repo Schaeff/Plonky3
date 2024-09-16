@@ -26,12 +26,11 @@ pub struct Proof<SC: StarkGenericConfig> {
     pub(crate) opened_values: OpenedValues<SC::Challenge>,
     pub(crate) opening_proof: PcsProof<SC>,
     pub(crate) degree_bits: usize,
-    pub(crate) challenge_counts: Vec<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Commitments<Com> {
-    pub(crate) stages: Vec<Com>,
+    pub(crate) traces_by_stage: Vec<Com>,
     pub(crate) quotient_chunks: Com,
 }
 
@@ -39,8 +38,8 @@ pub struct Commitments<Com> {
 pub struct OpenedValues<Challenge> {
     pub(crate) preprocessed_local: Vec<Challenge>,
     pub(crate) preprocessed_next: Vec<Challenge>,
-    pub(crate) stages_local: Vec<Vec<Challenge>>,
-    pub(crate) stages_next: Vec<Vec<Challenge>>,
+    pub(crate) traces_by_stage_local: Vec<Vec<Challenge>>,
+    pub(crate) traces_by_stage_next: Vec<Vec<Challenge>>,
     pub(crate) quotient_chunks: Vec<Vec<Challenge>>,
 }
 

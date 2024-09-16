@@ -222,7 +222,7 @@ where
     challenger.observe(quotient_commit.clone());
 
     let commitments = Commitments {
-        stages: state
+        traces_by_stage: state
             .processed_stages
             .iter()
             .map(|s| s.commitment.clone())
@@ -272,7 +272,7 @@ where
     };
 
     // get values for the traces
-    let (stages_local, stages_next): (Vec<_>, Vec<_>) = state
+    let (traces_by_stage_local, traces_by_stage_next): (Vec<_>, Vec<_>) = state
         .processed_stages
         .iter()
         .map(|_| {
@@ -289,8 +289,8 @@ where
     let quotient_chunks = value.iter().map(|v| v[0].clone()).collect_vec();
 
     let opened_values = OpenedValues {
-        stages_local,
-        stages_next,
+        traces_by_stage_local,
+        traces_by_stage_next,
         preprocessed_local,
         preprocessed_next,
         quotient_chunks,
@@ -300,11 +300,6 @@ where
         opened_values,
         opening_proof,
         degree_bits: log_degree,
-        challenge_counts: state
-            .processed_stages
-            .iter()
-            .map(|s| s.challenge_values.len())
-            .collect(),
     }
 }
 
@@ -441,13 +436,12 @@ impl<'a, SC: StarkGenericConfig> ProverState<'a, SC> {
             .in_scope(|| self.pcs.commit(vec![(self.trace_domain, stage.trace)]));
 
         self.challenger.observe(commitment.clone());
+        // observe the public inputs for this stage
+        self.challenger.observe_slice(&stage.public_values);
 
         let challenge_values = (0..stage.challenge_count)
             .map(|_| self.challenger.sample())
             .collect();
-
-        // observe the public inputs for this stage
-        self.challenger.observe_slice(&stage.public_values);
 
         self.processed_stages.push(ProcessedStage {
             public_values: stage.public_values,

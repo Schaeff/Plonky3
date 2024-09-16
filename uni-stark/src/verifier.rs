@@ -52,7 +52,6 @@ where
         opened_values,
         opening_proof,
         degree_bits,
-        challenge_counts,
     } = proof;
 
     let degree = 1 << degree_bits;
@@ -64,7 +63,10 @@ where
             .collect::<Vec<_>>(),
     );
     let quotient_degree = 1 << log_quotient_degree;
-    let stages = proof.commitments.stages.len();
+    let stage_count = proof.commitments.traces_by_stage.len();
+    let challenge_counts: Vec<usize> = (0..stage_count)
+        .map(|i| <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(air, i as u32))
+        .collect();
 
     let pcs = config.pcs();
     let trace_domain = pcs.natural_domain_for_degree(degree);
@@ -72,7 +74,7 @@ where
         trace_domain.create_disjoint_domain(1 << (degree_bits + log_quotient_degree));
     let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
-    let air_widths = (0..stages)
+    let air_widths = (0..stage_count)
         .map(|stage| {
             <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_width(air, stage as u32)
         })
@@ -81,12 +83,12 @@ where
     let valid_shape = opened_values.preprocessed_local.len() == air_fixed_width
         && opened_values.preprocessed_next.len() == air_fixed_width
         && opened_values
-            .stages_local
+            .traces_by_stage_local
             .iter()
             .zip(&air_widths)
             .all(|(stage, air_width)| stage.len() == *air_width)
         && opened_values
-            .stages_next
+            .traces_by_stage_next
             .iter()
             .zip(&air_widths)
             .all(|(stage, air_width)| stage.len() == *air_width)
@@ -95,8 +97,8 @@ where
             .quotient_chunks
             .iter()
             .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
-        && public_values.len() == stages
-        && challenge_counts.len() == stages;
+        && public_values.len() == stage_count
+        && challenge_counts.len() == stage_count;
     if !valid_shape {
         return Err(VerificationError::InvalidProofShape);
     }
@@ -116,14 +118,14 @@ where
     let mut challenges = vec![];
 
     commitments
-        .stages
+        .traces_by_stage
         .iter()
         .zip(&public_values)
         .zip(challenge_counts)
         .for_each(|((commitment, public_values), challenge_count)| {
             challenger.observe(commitment.clone());
-            challenges.push((0..*challenge_count).map(|_| challenger.sample()).collect());
             challenger.observe_slice(public_values);
+            challenges.push((0..challenge_count).map(|_| challenger.sample()).collect());
         });
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
@@ -151,9 +153,9 @@ where
             )
             .chain(
                 izip!(
-                    commitments.stages.iter(),
-                    opened_values.stages_local.iter(),
-                    opened_values.stages_next.iter()
+                    commitments.traces_by_stage.iter(),
+                    opened_values.traces_by_stage_local.iter(),
+                    opened_values.traces_by_stage_next.iter()
                 )
                 .map(|(trace_commit, opened_local, opened_next)| {
                     (
@@ -219,9 +221,9 @@ where
     );
 
     let stages = opened_values
-        .stages_local
+        .traces_by_stage_local
         .iter()
-        .zip(opened_values.stages_next.iter())
+        .zip(opened_values.traces_by_stage_next.iter())
         .map(|(trace_local, trace_next)| {
             VerticalPair::new(
                 RowMajorMatrixView::new_row(trace_local),
