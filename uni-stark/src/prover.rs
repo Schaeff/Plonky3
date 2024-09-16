@@ -40,7 +40,7 @@ pub fn prove<
     air: &A,
     challenger: &mut SC::Challenger,
     main_trace: RowMajorMatrix<Val<SC>>,
-    public_values: &[Val<SC>],
+    public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
@@ -72,7 +72,9 @@ pub fn prove_with_key<
     challenger: &mut SC::Challenger,
     stage_0_trace: RowMajorMatrix<Val<SC>>,
     next_stage_trace_callback: &C,
-    stage_0_public_values: &[Val<SC>],
+    #[allow(clippy::ptr_arg)]
+    // we do not use `&[Val<SC>]` in order to keep the same API
+    stage_0_public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
