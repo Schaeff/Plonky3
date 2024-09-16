@@ -6,7 +6,6 @@ use p3_symmetric::Permutation;
 use crate::{monty_reduce, FieldParameters, MontyField31, MontyParameters};
 
 /// Everything needed to compute multiplication by a WIDTH x WIDTH diffusion matrix whose monty form is 1 + Diag(vec).
-///
 /// vec is assumed to be of the form [-2, ...] with all entries after the first being small powers of 2.
 pub trait DiffusionMatrixParameters<FP: FieldParameters, const WIDTH: usize>: Clone + Sync {
     // Most of the time, ArrayLike will be [u8; WIDTH - 1].
