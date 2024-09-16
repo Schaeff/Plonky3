@@ -8,13 +8,6 @@ pub trait MultistageAirBuilder: AirBuilderWithPublicValues {
 
     /// Challenges from each stage, drawn from the base field
     fn stage_challenges(&self, stage: usize) -> &[Self::Challenge];
-
-    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
-        match stage {
-            0 => self.public_values(),
-            _ => unimplemented!(),
-        }
-    }
 }
 
 pub trait MultiStageAir<AB: AirBuilder>: Air<AB> {

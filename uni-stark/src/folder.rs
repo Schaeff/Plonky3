@@ -13,7 +13,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub challenges: Vec<Vec<Val<SC>>>,
     pub stages: Vec<RowMajorMatrix<PackedVal<SC>>>,
     pub preprocessed: RowMajorMatrix<PackedVal<SC>>,
-    pub public_values: &'a Vec<Vec<Val<SC>>>,
+    pub public_values: &'a Vec<Val<SC>>,
     pub is_first_row: PackedVal<SC>,
     pub is_last_row: PackedVal<SC>,
     pub is_transition: PackedVal<SC>,
@@ -28,7 +28,7 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
     pub challenges: Vec<Vec<Val<SC>>>,
     pub stages: Vec<ViewPair<'a, SC::Challenge>>,
     pub preprocessed: ViewPair<'a, SC::Challenge>,
-    pub public_values: Vec<&'a Vec<Val<SC>>>,
+    pub public_values: &'a Vec<Val<SC>>,
     pub is_first_row: SC::Challenge,
     pub is_last_row: SC::Challenge,
     pub is_transition: SC::Challenge,
@@ -73,7 +73,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraint
     type PublicVar = Val<SC>;
 
     fn public_values(&self) -> &[Self::PublicVar] {
-        self.stage_public_values(0)
+        self.public_values
     }
 }
 
@@ -86,9 +86,6 @@ impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for ProverConstraintFolder
 
     fn stage_challenges(&self, stage: usize) -> &[Self::Challenge] {
         &self.challenges[stage]
-    }
-    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
-        &self.public_values[stage]
     }
 }
 
@@ -135,7 +132,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstrai
     type PublicVar = Val<SC>;
 
     fn public_values(&self) -> &[Self::PublicVar] {
-        self.stage_public_values(0)
+        self.public_values
     }
 }
 
@@ -148,9 +145,6 @@ impl<'a, SC: StarkGenericConfig> MultistageAirBuilder for VerifierConstraintFold
 
     fn stage_challenges(&self, stage: usize) -> &[Self::Challenge] {
         &self.challenges[stage]
-    }
-    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
-        self.public_values[stage]
     }
 }
 

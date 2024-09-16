@@ -40,6 +40,8 @@ pub fn prove<
     air: &A,
     challenger: &mut SC::Challenger,
     main_trace: RowMajorMatrix<Val<SC>>,
+    #[allow(clippy::ptr_arg)]
+    // we do not use `&[Val<SC>]` in order to keep the same API
     public_values: &Vec<Val<SC>>,
 ) -> Proof<SC>
 where
@@ -47,6 +49,12 @@ where
     A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
         + for<'a> MultiStageAir<ProverConstraintFolder<'a, SC>>,
 {
+    let public_values = public_values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| (index, *value))
+        .collect();
+
     prove_with_key(
         config,
         None,
@@ -54,7 +62,7 @@ where
         challenger,
         main_trace,
         &UnusedCallback,
-        public_values,
+        &public_values,
     )
 }
 
@@ -72,9 +80,7 @@ pub fn prove_with_key<
     challenger: &mut SC::Challenger,
     stage_0_trace: RowMajorMatrix<Val<SC>>,
     next_stage_trace_callback: &C,
-    #[allow(clippy::ptr_arg)]
-    // we do not use `&[Val<SC>]` in order to keep the same API
-    stage_0_public_values: &Vec<Val<SC>>,
+    stage_0_public_values: &Vec<(usize, Val<SC>)>,
 ) -> Proof<SC>
 where
     SC: StarkGenericConfig,
@@ -84,10 +90,6 @@ where
 {
     let degree = stage_0_trace.height();
     let log_degree = log2_strict_usize(degree);
-
-    let log_quotient_degree =
-        get_log_quotient_degree::<Val<SC>, A>(air, &[stage_0_public_values.len()]);
-    let quotient_degree = 1 << log_quotient_degree;
 
     let stage_count = <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_count(air);
 
@@ -103,6 +105,7 @@ where
     };
 
     let mut state: ProverState<SC> = ProverState::new(pcs, trace_domain, challenger);
+    state.add_public_values(stage_0_public_values.iter().cloned());
     let mut stage = Stage {
         trace: stage_0_trace,
         challenge_count: <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(air, 0),
@@ -146,6 +149,12 @@ where
     // sanity check that we processed as many stages as expected
     assert_eq!(state.processed_stages.len(), stage_count);
 
+    let public_values: Vec<_> = state
+        .public_values
+        .into_iter()
+        .map(|v| v.unwrap())
+        .collect();
+
     // with the witness complete, check the constraints
     #[cfg(debug_assertions)]
     crate::check_constraints::check_constraints(
@@ -153,11 +162,7 @@ where
         &air.preprocessed_trace()
             .unwrap_or(RowMajorMatrix::new(Default::default(), 0)),
         state.processed_stages.iter().map(|s| &s.trace).collect(),
-        &state
-            .processed_stages
-            .iter()
-            .map(|s| &s.public_values)
-            .collect(),
+        &public_values,
         state
             .processed_stages
             .iter()
@@ -165,14 +170,8 @@ where
             .collect(),
     );
 
-    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-        air,
-        &state
-            .processed_stages
-            .iter()
-            .map(|s| s.public_values.len())
-            .collect::<Vec<_>>(),
-    );
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(air, public_values.len());
+    let quotient_degree = 1 << log_quotient_degree;
 
     let challenger = &mut state.challenger;
 
@@ -195,12 +194,6 @@ where
         .processed_stages
         .iter()
         .map(|stage| stage.challenge_values.clone())
-        .collect();
-
-    let public_values = state
-        .processed_stages
-        .iter()
-        .map(|stage| stage.public_values.clone())
         .collect();
 
     let quotient_values = quotient_values(
@@ -312,7 +305,7 @@ where
 #[instrument(name = "compute quotient polynomial", skip_all)]
 fn quotient_values<'a, SC, A, Mat>(
     air: &A,
-    public_values: &'a Vec<Vec<Val<SC>>>,
+    public_values: &'a Vec<Val<SC>>,
     trace_domain: Domain<SC>,
     quotient_domain: Domain<SC>,
     preprocessed_on_quotient_domain: Option<Mat>,
@@ -416,6 +409,7 @@ pub struct ProverState<'a, SC: StarkGenericConfig> {
     pub(crate) challenger: &'a mut SC::Challenger,
     pub(crate) pcs: &'a <SC>::Pcs,
     pub(crate) trace_domain: Domain<SC>,
+    pub(crate) public_values: Vec<Option<Val<SC>>>,
 }
 
 impl<'a, SC: StarkGenericConfig> ProverState<'a, SC> {
@@ -429,6 +423,24 @@ impl<'a, SC: StarkGenericConfig> ProverState<'a, SC> {
             challenger,
             pcs,
             trace_domain,
+            public_values: Default::default(),
+        }
+    }
+
+    pub(crate) fn add_public_values(
+        &mut self,
+        public_values: impl IntoIterator<Item = (usize, Val<SC>)>,
+    ) {
+        for (index, value) in public_values {
+            if self.public_values.len() <= index + 1 {
+                self.public_values.resize(index + 1, None);
+            }
+            match self.public_values[index] {
+                Some(_) => panic!("public value at index {index} is already set"),
+                None => {
+                    self.public_values[index] = Some(value);
+                }
+            }
         }
     }
 
@@ -446,11 +458,9 @@ impl<'a, SC: StarkGenericConfig> ProverState<'a, SC> {
             .map(|_| self.challenger.sample())
             .collect();
 
-        // observe the public inputs for this stage
-        self.challenger.observe_slice(&stage.public_values);
+        self.add_public_values(stage.public_values);
 
         self.processed_stages.push(ProcessedStage {
-            public_values: stage.public_values,
             prover_data,
             commitment,
             challenge_values,
@@ -467,20 +477,24 @@ pub struct Stage<SC: StarkGenericConfig> {
     /// the number of challenges to be drawn at the end of this stage
     pub(crate) challenge_count: usize,
     /// the public values for this stage
-    pub(crate) public_values: Vec<Val<SC>>,
+    pub(crate) public_values: Vec<(usize, Val<SC>)>,
 }
 
 pub struct CallbackResult<T> {
     /// the trace for this stage
     pub(crate) trace: RowMajorMatrix<T>,
     /// the values of the public inputs of this stage
-    pub(crate) public_values: Vec<T>,
+    pub(crate) public_values: Vec<(usize, T)>,
     /// the values of the challenges drawn at the previous stage
     pub(crate) challenges: Vec<T>,
 }
 
 impl<T> CallbackResult<T> {
-    pub fn new(trace: RowMajorMatrix<T>, public_values: Vec<T>, challenges: Vec<T>) -> Self {
+    pub fn new(
+        trace: RowMajorMatrix<T>,
+        public_values: Vec<(usize, T)>,
+        challenges: Vec<T>,
+    ) -> Self {
         Self {
             trace,
             public_values,

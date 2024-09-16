@@ -30,7 +30,7 @@ where
     A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
         + for<'a> MultiStageAir<VerifierConstraintFolder<'a, SC>>,
 {
-    verify_with_key(config, None, air, challenger, proof, vec![public_values])
+    verify_with_key(config, None, air, challenger, proof, public_values)
 }
 
 #[instrument(skip_all)]
@@ -40,7 +40,7 @@ pub fn verify_with_key<SC, A>(
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
-    public_values: Vec<&Vec<Val<SC>>>,
+    public_values: &Vec<Val<SC>>,
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
@@ -56,13 +56,7 @@ where
     } = proof;
 
     let degree = 1 << degree_bits;
-    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-        air,
-        &public_values
-            .iter()
-            .map(|values| values.len())
-            .collect::<Vec<_>>(),
-    );
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(air, public_values.len());
     let quotient_degree = 1 << log_quotient_degree;
     let stages = proof.commitments.stages.len();
 
@@ -118,13 +112,13 @@ where
     commitments
         .stages
         .iter()
-        .zip(&public_values)
         .zip(challenge_counts)
-        .for_each(|((commitment, public_values), challenge_count)| {
+        .for_each(|(commitment, challenge_count)| {
             challenger.observe(commitment.clone());
             challenges.push((0..*challenge_count).map(|_| challenger.sample()).collect());
-            challenger.observe_slice(public_values);
         });
+
+    challenger.observe_slice(public_values);
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
 

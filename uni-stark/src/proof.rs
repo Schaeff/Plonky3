@@ -59,7 +59,6 @@ pub struct ProcessedStage<SC: StarkGenericConfig> {
     pub(crate) commitment: Com<SC>,
     pub(crate) prover_data: PcsProverData<SC>,
     pub(crate) challenge_values: Vec<Val<SC>>,
-    pub(crate) public_values: Vec<Val<SC>>,
     #[cfg(debug_assertions)]
     pub(crate) trace: RowMajorMatrix<Val<SC>>,
 }

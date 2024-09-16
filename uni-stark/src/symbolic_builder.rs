@@ -13,13 +13,13 @@ use crate::traits::{MultiStageAir, MultistageAirBuilder};
 use crate::Entry;
 
 #[instrument(name = "infer log of constraint degree", skip_all)]
-pub fn get_log_quotient_degree<F, A>(air: &A, public_values_counts: &[usize]) -> usize
+pub fn get_log_quotient_degree<F, A>(air: &A, num_public_values: usize) -> usize
 where
     F: Field,
     A: MultiStageAir<SymbolicAirBuilder<F>>,
 {
     // We pad to at least degree 2, since a quotient argument doesn't make sense with smaller degrees.
-    let constraint_degree = get_max_constraint_degree(air, public_values_counts).max(2);
+    let constraint_degree = get_max_constraint_degree(air, num_public_values).max(2);
 
     // The quotient's actual degree is approximately (max_constraint_degree - 1) n,
     // where subtracting 1 comes from division by the zerofier.
@@ -28,12 +28,12 @@ where
 }
 
 #[instrument(name = "infer constraint degree", skip_all, level = "debug")]
-pub fn get_max_constraint_degree<F, A>(air: &A, public_values_counts: &[usize]) -> usize
+pub fn get_max_constraint_degree<F, A>(air: &A, num_public_values: usize) -> usize
 where
     F: Field,
     A: MultiStageAir<SymbolicAirBuilder<F>>,
 {
-    get_symbolic_constraints(air, public_values_counts)
+    get_symbolic_constraints(air, num_public_values)
         .iter()
         .map(|c| c.degree_multiple())
         .max()
@@ -43,7 +43,7 @@ where
 #[instrument(name = "evaluate constraints symbolically", skip_all, level = "debug")]
 pub fn get_symbolic_constraints<F, A>(
     air: &A,
-    public_values_counts: &[usize],
+    num_public_values: usize,
 ) -> Vec<SymbolicExpression<F>>
 where
     F: Field,
@@ -58,7 +58,7 @@ where
     let mut builder = SymbolicAirBuilder::new(
         air.preprocessed_width(),
         &widths,
-        public_values_counts,
+        num_public_values,
         challenges,
     );
     air.eval(&mut builder);
@@ -71,7 +71,7 @@ pub struct SymbolicAirBuilder<F: Field> {
     challenges: Vec<Vec<SymbolicVariable<F>>>,
     preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
     stages: Vec<RowMajorMatrix<SymbolicVariable<F>>>,
-    public_values: Vec<Vec<SymbolicVariable<F>>>,
+    public_values: Vec<SymbolicVariable<F>>,
     constraints: Vec<SymbolicExpression<F>>,
 }
 
@@ -79,7 +79,7 @@ impl<F: Field> SymbolicAirBuilder<F> {
     pub(crate) fn new(
         preprocessed_width: usize,
         stage_widths: &[usize],
-        public_value_counts: &[usize],
+        num_public_values: usize,
         challenges: Vec<usize>,
     ) -> Self {
         let prep_values = [0, 1]
@@ -115,18 +115,8 @@ impl<F: Field> SymbolicAirBuilder<F> {
                     .collect()
             })
             .collect();
-        let mut public_value_index = 0;
-        let public_values = public_value_counts
-            .iter()
-            .map(|count| {
-                (0..*count)
-                    .map(|_| {
-                        let res = SymbolicVariable::new(Entry::Public, public_value_index);
-                        public_value_index += 1;
-                        res
-                    })
-                    .collect()
-            })
+        let public_values = (0..num_public_values)
+            .map(move |index| SymbolicVariable::new(Entry::Public, index))
             .collect();
         Self {
             challenges,
@@ -177,16 +167,12 @@ impl<F: Field> AirBuilderWithPublicValues for SymbolicAirBuilder<F> {
     type PublicVar = SymbolicVariable<F>;
 
     fn public_values(&self) -> &[Self::PublicVar] {
-        self.stage_public_values(0)
+        &self.public_values
     }
 }
 
 impl<F: Field> MultistageAirBuilder for SymbolicAirBuilder<F> {
     type Challenge = Self::Var;
-
-    fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
-        &self.public_values[stage]
-    }
 
     fn stage_trace(&self, stage: usize) -> Self::M {
         self.stages[stage].clone()
