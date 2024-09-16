@@ -85,10 +85,6 @@ where
     let degree = stage_0_trace.height();
     let log_degree = log2_strict_usize(degree);
 
-    let log_quotient_degree =
-        get_log_quotient_degree::<Val<SC>, A>(air, &[stage_0_public_values.len()]);
-    let quotient_degree = 1 << log_quotient_degree;
-
     let stage_count = <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_count(air);
 
     let pcs = config.pcs();
@@ -173,6 +169,7 @@ where
             .map(|s| s.public_values.len())
             .collect::<Vec<_>>(),
     );
+    let quotient_degree = 1 << log_quotient_degree;
 
     let challenger = &mut state.challenger;
 
