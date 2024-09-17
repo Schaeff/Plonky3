@@ -194,7 +194,7 @@ where
         .map(|stage| stage.challenge_values.clone())
         .collect();
 
-    let public_values = state
+    let public_values_by_stage = state
         .processed_stages
         .iter()
         .map(|stage| stage.public_values.clone())
@@ -202,7 +202,7 @@ where
 
     let quotient_values = quotient_values(
         air,
-        &public_values,
+        &public_values_by_stage,
         trace_domain,
         quotient_domain,
         preprocessed_on_quotient_domain,
@@ -304,7 +304,7 @@ where
 #[instrument(name = "compute quotient polynomial", skip_all)]
 fn quotient_values<'a, SC, A, Mat>(
     air: &A,
-    public_values: &'a Vec<Vec<Val<SC>>>,
+    public_values_by_stage: &'a Vec<Vec<Val<SC>>>,
     trace_domain: Domain<SC>,
     quotient_domain: Domain<SC>,
     preprocessed_on_quotient_domain: Option<Mat>,
@@ -360,7 +360,7 @@ where
                 preprocessed_width,
             );
 
-            let stages = traces_on_quotient_domain
+            let traces_by_stage = traces_on_quotient_domain
                 .iter()
                 .map(|trace_on_quotient_domain| {
                     RowMajorMatrix::new(
@@ -378,9 +378,9 @@ where
             let accumulator = PackedChallenge::<SC>::zero();
             let mut folder = ProverConstraintFolder {
                 challenges: challenges.clone(),
-                stages,
+                traces_by_stage,
                 preprocessed,
-                public_values,
+                public_values_by_stage,
                 is_first_row,
                 is_last_row,
                 is_transition,

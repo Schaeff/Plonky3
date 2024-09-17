@@ -40,7 +40,7 @@ pub fn verify_with_key<SC, A>(
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
-    public_values: Vec<&Vec<Val<SC>>>,
+    public_values_by_stage: Vec<&Vec<Val<SC>>>,
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
@@ -57,7 +57,7 @@ where
     let degree = 1 << degree_bits;
     let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
         air,
-        &public_values
+        &public_values_by_stage
             .iter()
             .map(|values| values.len())
             .collect::<Vec<_>>(),
@@ -76,7 +76,7 @@ where
 
     let air_widths = (0..stage_count)
         .map(|stage| {
-            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_width(air, stage as u32)
+            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(air, stage as u32)
         })
         .collect::<Vec<usize>>();
     let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
@@ -97,8 +97,9 @@ where
             .quotient_chunks
             .iter()
             .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
-        && public_values.len() == stage_count
+        && public_values_by_stage.len() == stage_count
         && challenge_counts.len() == stage_count;
+
     if !valid_shape {
         return Err(VerificationError::InvalidProofShape);
     }
@@ -120,7 +121,7 @@ where
     commitments
         .traces_by_stage
         .iter()
-        .zip(&public_values)
+        .zip(&public_values_by_stage)
         .zip(challenge_counts)
         .for_each(|((commitment, public_values), challenge_count)| {
             challenger.observe(commitment.clone());
@@ -220,7 +221,7 @@ where
         RowMajorMatrixView::new_row(&opened_values.preprocessed_next),
     );
 
-    let stages = opened_values
+    let traces_by_stage = opened_values
         .traces_by_stage_local
         .iter()
         .zip(opened_values.traces_by_stage_next.iter())
@@ -235,8 +236,8 @@ where
     let mut folder = VerifierConstraintFolder {
         challenges,
         preprocessed,
-        stages,
-        public_values,
+        traces_by_stage,
+        public_values_by_stage,
         is_first_row: sels.is_first_row,
         is_last_row: sels.is_last_row,
         is_transition: sels.is_transition,

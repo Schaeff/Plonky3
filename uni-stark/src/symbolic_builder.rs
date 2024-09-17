@@ -50,7 +50,7 @@ where
     A: MultiStageAir<SymbolicAirBuilder<F>>,
 {
     let widths: Vec<_> = (0..air.stage_count())
-        .map(|i| air.stage_width(i as u32))
+        .map(|i| air.stage_trace_width(i as u32))
         .collect();
     let challenges: Vec<_> = (0..air.stage_count())
         .map(|i| air.stage_challenge_count(i as u32))
@@ -70,8 +70,8 @@ where
 pub struct SymbolicAirBuilder<F: Field> {
     challenges: Vec<Vec<SymbolicVariable<F>>>,
     preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
-    stages: Vec<RowMajorMatrix<SymbolicVariable<F>>>,
-    public_values: Vec<Vec<SymbolicVariable<F>>>,
+    traces_by_stage: Vec<RowMajorMatrix<SymbolicVariable<F>>>,
+    public_values_by_stage: Vec<Vec<SymbolicVariable<F>>>,
     constraints: Vec<SymbolicExpression<F>>,
 }
 
@@ -89,7 +89,7 @@ impl<F: Field> SymbolicAirBuilder<F> {
                     .map(move |index| SymbolicVariable::new(Entry::Preprocessed { offset }, index))
             })
             .collect();
-        let stages = stage_widths
+        let traces_by_stage = stage_widths
             .iter()
             .map(|width| {
                 let values = [0, 1]
@@ -116,7 +116,7 @@ impl<F: Field> SymbolicAirBuilder<F> {
             })
             .collect();
         let mut public_value_index = 0;
-        let public_values = public_value_counts
+        let public_values_by_stage = public_value_counts
             .iter()
             .map(|count| {
                 (0..*count)
@@ -131,8 +131,8 @@ impl<F: Field> SymbolicAirBuilder<F> {
         Self {
             challenges,
             preprocessed: RowMajorMatrix::new(prep_values, preprocessed_width),
-            stages,
-            public_values,
+            traces_by_stage,
+            public_values_by_stage,
             constraints: vec![],
         }
     }
@@ -149,7 +149,7 @@ impl<F: Field> AirBuilder for SymbolicAirBuilder<F> {
     type M = RowMajorMatrix<Self::Var>;
 
     fn main(&self) -> Self::M {
-        self.stages[0].clone()
+        self.traces_by_stage[0].clone()
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -185,11 +185,11 @@ impl<F: Field> MultistageAirBuilder for SymbolicAirBuilder<F> {
     type Challenge = Self::Var;
 
     fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
-        &self.public_values[stage]
+        &self.public_values_by_stage[stage]
     }
 
     fn stage_trace(&self, stage: usize) -> Self::M {
-        self.stages[stage].clone()
+        self.traces_by_stage[stage].clone()
     }
 
     fn stage_challenges(&self, stage: usize) -> &[Self::Challenge] {

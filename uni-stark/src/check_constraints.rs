@@ -14,15 +14,15 @@ use crate::traits::MultistageAirBuilder;
 pub(crate) fn check_constraints<F, A>(
     air: &A,
     preprocessed: &RowMajorMatrix<F>,
-    stages: Vec<&RowMajorMatrix<F>>,
-    public_values: &Vec<&Vec<F>>,
+    traces_by_stage: Vec<&RowMajorMatrix<F>>,
+    public_values_by_stage: &Vec<&Vec<F>>,
     challenges: Vec<&Vec<F>>,
 ) where
     F: Field,
     A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
-    let num_stages = stages.len();
-    let height = stages[0].height();
+    let num_stages = traces_by_stage.len();
+    let height = traces_by_stage[0].height();
 
     (0..height).for_each(|i| {
         let i_next = (i + 1) % height;
@@ -34,7 +34,7 @@ pub(crate) fn check_constraints<F, A>(
             RowMajorMatrixView::new_row(&*next_preprocessed),
         );
 
-        let stages_local_next = stages
+        let stages_local_next = traces_by_stage
             .iter()
             .map(|trace| {
                 let stage_local = trace.row_slice(i);
@@ -43,7 +43,7 @@ pub(crate) fn check_constraints<F, A>(
             })
             .collect_vec();
 
-        let stages = (0..num_stages)
+        let traces_by_stage = (0..num_stages)
             .map(|stage| {
                 VerticalPair::new(
                     RowMajorMatrixView::new_row(&*stages_local_next[stage].0),
@@ -56,8 +56,8 @@ pub(crate) fn check_constraints<F, A>(
             row_index: i,
             challenges: challenges.clone(),
             preprocessed,
-            stages,
-            public_values,
+            traces_by_stage,
+            public_values_by_stage,
             is_first_row: F::from_bool(i == 0),
             is_last_row: F::from_bool(i == height - 1),
             is_transition: F::from_bool(i != height - 1),
@@ -74,8 +74,8 @@ pub struct DebugConstraintBuilder<'a, F: Field> {
     row_index: usize,
     preprocessed: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
     challenges: Vec<&'a Vec<F>>,
-    stages: Vec<VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>>,
-    public_values: &'a [&'a Vec<F>],
+    traces_by_stage: Vec<VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>>,
+    public_values_by_stage: &'a [&'a Vec<F>],
     is_first_row: F,
     is_last_row: F,
     is_transition: F,
@@ -107,7 +107,7 @@ where
     }
 
     fn main(&self) -> Self::M {
-        self.stages[0]
+        self.traces_by_stage[0]
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
@@ -148,11 +148,11 @@ impl<'a, F: Field> MultistageAirBuilder for DebugConstraintBuilder<'a, F> {
     type Challenge = Self::Expr;
 
     fn stage_public_values(&self, stage: usize) -> &[Self::F] {
-        self.public_values[stage]
+        self.public_values_by_stage[stage]
     }
 
     fn stage_trace(&self, stage: usize) -> Self::M {
-        self.stages[stage]
+        self.traces_by_stage[stage]
     }
 
     fn stage_challenges(&self, stage: usize) -> &[Self::Expr] {

@@ -9,6 +9,7 @@ pub trait MultistageAirBuilder: AirBuilderWithPublicValues {
     /// Challenges from each stage, drawn from the base field
     fn stage_challenges(&self, stage: usize) -> &[Self::Challenge];
 
+    /// Public values for each stage
     fn stage_public_values(&self, stage: usize) -> &[Self::PublicVar] {
         match stage {
             0 => self.public_values(),
@@ -22,8 +23,8 @@ pub trait MultiStageAir<AB: AirBuilder>: Air<AB> {
         1
     }
 
-    /// The number of columns in a given higher-stage trace.
-    fn stage_width(&self, stage: u32) -> usize {
+    /// The number of trace columns in this stage
+    fn stage_trace_width(&self, stage: u32) -> usize {
         match stage {
             0 => self.width(),
             _ => unimplemented!(),
