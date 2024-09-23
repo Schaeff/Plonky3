@@ -2,8 +2,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::iter;
 
-use itertools::Itertools;
-use p3_air::{Air, BaseAir};
+use itertools::{izip, Itertools};
+use p3_air::BaseAir;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, Field};
@@ -12,6 +12,7 @@ use p3_matrix::stack::VerticalPair;
 use tracing::instrument;
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
+use crate::traits::MultiStageAir;
 use crate::{
     PcsError, Proof, StarkGenericConfig, StarkVerifyingKey, Val, VerifierConstraintFolder,
 };
@@ -26,9 +27,10 @@ pub fn verify<SC, A>(
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'a> MultiStageAir<VerifierConstraintFolder<'a, SC>>,
 {
-    verify_with_key(config, None, air, challenger, proof, public_values)
+    verify_with_key(config, None, air, challenger, proof, vec![public_values])
 }
 
 #[instrument(skip_all)]
@@ -38,11 +40,12 @@ pub fn verify_with_key<SC, A>(
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
-    public_values: &Vec<Val<SC>>,
+    public_values_by_stage: Vec<&Vec<Val<SC>>>,
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
-    A: Air<SymbolicAirBuilder<Val<SC>>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'a> MultiStageAir<VerifierConstraintFolder<'a, SC>>,
 {
     let Proof {
         commitments,
@@ -52,8 +55,18 @@ where
     } = proof;
 
     let degree = 1 << degree_bits;
-    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(air, public_values.len());
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+        air,
+        &public_values_by_stage
+            .iter()
+            .map(|values| values.len())
+            .collect::<Vec<_>>(),
+    );
     let quotient_degree = 1 << log_quotient_degree;
+    let stage_count = proof.commitments.traces_by_stage.len();
+    let challenge_counts: Vec<usize> = (0..stage_count)
+        .map(|i| <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(air, i as u32))
+        .collect();
 
     let pcs = config.pcs();
     let trace_domain = pcs.natural_domain_for_degree(degree);
@@ -61,17 +74,32 @@ where
         trace_domain.create_disjoint_domain(1 << (degree_bits + log_quotient_degree));
     let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
-    let air_width = <A as BaseAir<Val<SC>>>::width(air);
+    let air_widths = (0..stage_count)
+        .map(|stage| {
+            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(air, stage as u32)
+        })
+        .collect::<Vec<usize>>();
     let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
     let valid_shape = opened_values.preprocessed_local.len() == air_fixed_width
         && opened_values.preprocessed_next.len() == air_fixed_width
-        && opened_values.trace_local.len() == air_width
-        && opened_values.trace_next.len() == air_width
+        && opened_values
+            .traces_by_stage_local
+            .iter()
+            .zip(&air_widths)
+            .all(|(stage, air_width)| stage.len() == *air_width)
+        && opened_values
+            .traces_by_stage_next
+            .iter()
+            .zip(&air_widths)
+            .all(|(stage, air_width)| stage.len() == *air_width)
         && opened_values.quotient_chunks.len() == quotient_degree
         && opened_values
             .quotient_chunks
             .iter()
-            .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D);
+            .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
+        && public_values_by_stage.len() == stage_count
+        && challenge_counts.len() == stage_count;
+
     if !valid_shape {
         return Err(VerificationError::InvalidProofShape);
     }
@@ -87,8 +115,19 @@ where
     if let Some(verifying_key) = verifying_key {
         challenger.observe(verifying_key.preprocessed_commit.clone())
     };
-    challenger.observe(commitments.trace.clone());
-    challenger.observe_slice(public_values);
+
+    let mut challenges = vec![];
+
+    commitments
+        .traces_by_stage
+        .iter()
+        .zip(&public_values_by_stage)
+        .zip(challenge_counts)
+        .for_each(|((commitment, public_values), challenge_count)| {
+            challenger.observe(commitment.clone());
+            challenger.observe_slice(public_values);
+            challenges.push((0..challenge_count).map(|_| challenger.sample()).collect());
+        });
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
 
@@ -113,26 +152,34 @@ where
                     })
                     .into_iter(),
             )
-            .chain([
-                (
-                    commitments.trace.clone(),
-                    vec![(
-                        trace_domain,
-                        vec![
-                            (zeta, opened_values.trace_local.clone()),
-                            (zeta_next, opened_values.trace_next.clone()),
-                        ],
-                    )],
-                ),
-                (
-                    commitments.quotient_chunks.clone(),
-                    quotient_chunks_domains
-                        .iter()
-                        .zip(&opened_values.quotient_chunks)
-                        .map(|(domain, values)| (*domain, vec![(zeta, values.clone())]))
-                        .collect_vec(),
-                ),
-            ])
+            .chain(
+                izip!(
+                    commitments.traces_by_stage.iter(),
+                    opened_values.traces_by_stage_local.iter(),
+                    opened_values.traces_by_stage_next.iter()
+                )
+                .map(|(trace_commit, opened_local, opened_next)| {
+                    (
+                        trace_commit.clone(),
+                        vec![(
+                            trace_domain,
+                            vec![
+                                (zeta, opened_local.clone()),
+                                (zeta_next, opened_next.clone()),
+                            ],
+                        )],
+                    )
+                })
+                .collect_vec(),
+            )
+            .chain([(
+                commitments.quotient_chunks.clone(),
+                quotient_chunks_domains
+                    .iter()
+                    .zip(&opened_values.quotient_chunks)
+                    .map(|(domain, values)| (*domain, vec![(zeta, values.clone())]))
+                    .collect_vec(),
+            )])
             .collect_vec(),
         opening_proof,
         challenger,
@@ -174,15 +221,23 @@ where
         RowMajorMatrixView::new_row(&opened_values.preprocessed_next),
     );
 
-    let main = VerticalPair::new(
-        RowMajorMatrixView::new_row(&opened_values.trace_local),
-        RowMajorMatrixView::new_row(&opened_values.trace_next),
-    );
+    let traces_by_stage = opened_values
+        .traces_by_stage_local
+        .iter()
+        .zip(opened_values.traces_by_stage_next.iter())
+        .map(|(trace_local, trace_next)| {
+            VerticalPair::new(
+                RowMajorMatrixView::new_row(trace_local),
+                RowMajorMatrixView::new_row(trace_next),
+            )
+        })
+        .collect::<Vec<VerticalPair<_, _>>>();
 
     let mut folder = VerifierConstraintFolder {
+        challenges,
         preprocessed,
-        main,
-        public_values,
+        traces_by_stage,
+        public_values_by_stage,
         is_first_row: sels.is_first_row,
         is_last_row: sels.is_last_row,
         is_transition: sels.is_transition,

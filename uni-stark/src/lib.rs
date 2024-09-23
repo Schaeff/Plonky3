@@ -11,6 +11,7 @@ mod prover;
 mod symbolic_builder;
 mod symbolic_expression;
 mod symbolic_variable;
+mod traits;
 mod verifier;
 mod zerofier_coset;
 
@@ -26,5 +27,6 @@ pub use prover::*;
 pub use symbolic_builder::*;
 pub use symbolic_expression::*;
 pub use symbolic_variable::*;
+pub use traits::*;
 pub use verifier::*;
 pub use zerofier_coset::*;
