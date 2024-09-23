@@ -30,17 +30,36 @@ where
     A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
         + for<'a> MultiStageAir<VerifierConstraintFolder<'a, SC>>,
 {
-    verify_with_key(config, None, air, challenger, proof, vec![public_values])
+    verify_with_key(
+        config,
+        None,
+        vec![Table {
+            air,
+            public_values_by_stage: vec![public_values],
+        }],
+        challenger,
+        proof,
+    )
+}
+
+/// A sub-table to be proven, in the form of an air, a proving key
+struct Table<
+    'a,
+    SC: StarkGenericConfig,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'b> MultiStageAir<VerifierConstraintFolder<'b, SC>>,
+> {
+    air: &'a A,
+    public_values_by_stage: Vec<&'a Vec<Val<SC>>>,
 }
 
 #[instrument(skip_all)]
 pub fn verify_with_key<SC, A>(
     config: &SC,
     verifying_key: Option<&StarkVerifyingKey<SC>>,
-    air: &A,
+    inputs: Vec<Table<SC, A>>,
     challenger: &mut SC::Challenger,
     proof: &Proof<SC>,
-    public_values_by_stage: Vec<&Vec<Val<SC>>>,
 ) -> Result<(), VerificationError<PcsError<SC>>>
 where
     SC: StarkGenericConfig,
@@ -51,70 +70,86 @@ where
         commitments,
         opened_values,
         opening_proof,
-        degree_bits,
     } = proof;
 
-    let degree = 1 << degree_bits;
-    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-        air,
-        &public_values_by_stage
-            .iter()
-            .map(|values| values.len())
-            .collect::<Vec<_>>(),
-    );
-    let quotient_degree = 1 << log_quotient_degree;
-    let stage_count = proof.commitments.traces_by_stage.len();
-    let challenge_counts: Vec<usize> = (0..stage_count)
-        .map(|i| <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(air, i as u32))
-        .collect();
-
     let pcs = config.pcs();
-    let trace_domain = pcs.natural_domain_for_degree(degree);
-    let quotient_domain =
-        trace_domain.create_disjoint_domain(1 << (degree_bits + log_quotient_degree));
-    let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
-    let air_widths = (0..stage_count)
-        .map(|stage| {
-            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(air, stage as u32)
-        })
-        .collect::<Vec<usize>>();
-    let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(air);
-    let valid_shape = opened_values.preprocessed_local.len() == air_fixed_width
-        && opened_values.preprocessed_next.len() == air_fixed_width
-        && opened_values
-            .traces_by_stage_local
-            .iter()
-            .zip(&air_widths)
-            .all(|(stage, air_width)| stage.len() == *air_width)
-        && opened_values
-            .traces_by_stage_next
-            .iter()
-            .zip(&air_widths)
-            .all(|(stage, air_width)| stage.len() == *air_width)
-        && opened_values.quotient_chunks.len() == quotient_degree
-        && opened_values
-            .quotient_chunks
-            .iter()
-            .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
-        && public_values_by_stage.len() == stage_count
-        && challenge_counts.len() == stage_count;
+    // todo: check same length
+    let valid_shape = inputs
+        .iter()
+        .zip(opened_values)
+        .all(|(input, opened_values)| {
+            let degree = 1 << opened_values.degree_bits;
+            let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+                input.air,
+                &input
+                    .public_values_by_stage
+                    .iter()
+                    .map(|values| values.len())
+                    .collect::<Vec<_>>(),
+            );
+            let quotient_degree = 1 << log_quotient_degree;
+            let stage_count = proof.commitments.traces_by_stage.len();
+            let challenge_counts: Vec<usize> = (0..stage_count)
+                .map(|i| {
+                    <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(
+                        input.air, i as u32,
+                    )
+                })
+                .collect();
+
+            let trace_domain = pcs.natural_domain_for_degree(degree);
+            let quotient_domain = trace_domain
+                .create_disjoint_domain(1 << (opened_values.degree_bits + log_quotient_degree));
+            let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
+
+            let air_widths = (0..stage_count)
+                .map(|stage| {
+                    <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(
+                        input.air,
+                        stage as u32,
+                    )
+                })
+                .collect::<Vec<usize>>();
+            let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(input.air);
+            opened_values.preprocessed_local.len() == air_fixed_width
+                && opened_values.preprocessed_next.len() == air_fixed_width
+                && opened_values
+                    .traces_by_stage_local
+                    .iter()
+                    .zip(&air_widths)
+                    .all(|(stage, air_width)| stage.len() == *air_width)
+                && opened_values
+                    .traces_by_stage_next
+                    .iter()
+                    .zip(&air_widths)
+                    .all(|(stage, air_width)| stage.len() == *air_width)
+                && opened_values.quotient_chunks.len() == quotient_degree
+                && opened_values
+                    .quotient_chunks
+                    .iter()
+                    .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
+                && input.public_values_by_stage.len() == stage_count
+                && challenge_counts.len() == stage_count
+        });
 
     if !valid_shape {
         return Err(VerificationError::InvalidProofShape);
     }
 
-    // Observe the instance.
-    challenger.observe(Val::<SC>::from_canonical_usize(proof.degree_bits));
+    // Observe the instances.
+    for (input, opened_values) in inputs.iter().zip(opened_values) {
+        challenger.observe(Val::<SC>::from_canonical_usize(opened_values.degree_bits));
+        // TODO: Might be best practice to include other instance data here; see verifier comment.
+        if let Some(verifying_key) = input.verifying_key {
+            challenger.observe(verifying_key.preprocessed_commit.clone())
+        };
+    }
     // TODO: Might be best practice to include other instance data here in the transcript, like some
     // encoding of the AIR. This protects against transcript collisions between distinct instances.
     // Practically speaking though, the only related known attack is from failing to include public
     // values. It's not clear if failing to include other instance data could enable a transcript
     // collision, since most such changes would completely change the set of satisfying witnesses.
-
-    if let Some(verifying_key) = verifying_key {
-        challenger.observe(verifying_key.preprocessed_commit.clone())
-    };
 
     let mut challenges = vec![];
 
@@ -132,59 +167,65 @@ where
     challenger.observe(commitments.quotient_chunks.clone());
 
     let zeta: SC::Challenge = challenger.sample();
-    let zeta_next = trace_domain.next_point(zeta).unwrap();
 
-    pcs.verify(
-        iter::empty()
-            .chain(
-                verifying_key
-                    .map(|verifying_key| {
+    let verify_input = inputs
+        .iter()
+        .zip(proof.opened_values)
+        .map(|(input, opened_values)| {
+            let zeta_next = input.trace_domain(pcs).next_point(zeta).unwrap();
+
+            iter::empty()
+                .chain(
+                    verifying_key
+                        .map(|verifying_key| {
+                            (
+                                verifying_key.preprocessed_commit.clone(),
+                                (vec![(
+                                    trace_domain,
+                                    vec![
+                                        (zeta, opened_values.preprocessed_local.clone()),
+                                        (zeta_next, opened_values.preprocessed_next.clone()),
+                                    ],
+                                )]),
+                            )
+                        })
+                        .into_iter(),
+                )
+                .chain(
+                    izip!(
+                        commitments.traces_by_stage.iter(),
+                        opened_values.traces_by_stage_local.iter(),
+                        opened_values.traces_by_stage_next.iter()
+                    )
+                    .map(|(trace_commit, opened_local, opened_next)| {
                         (
-                            verifying_key.preprocessed_commit.clone(),
-                            (vec![(
+                            trace_commit.clone(),
+                            vec![(
                                 trace_domain,
                                 vec![
-                                    (zeta, opened_values.preprocessed_local.clone()),
-                                    (zeta_next, opened_values.preprocessed_next.clone()),
+                                    (zeta, opened_local.clone()),
+                                    (zeta_next, opened_next.clone()),
                                 ],
-                            )]),
+                            )],
                         )
                     })
-                    .into_iter(),
-            )
-            .chain(
-                izip!(
-                    commitments.traces_by_stage.iter(),
-                    opened_values.traces_by_stage_local.iter(),
-                    opened_values.traces_by_stage_next.iter()
-                )
-                .map(|(trace_commit, opened_local, opened_next)| {
-                    (
-                        trace_commit.clone(),
-                        vec![(
-                            trace_domain,
-                            vec![
-                                (zeta, opened_local.clone()),
-                                (zeta_next, opened_next.clone()),
-                            ],
-                        )],
-                    )
-                })
-                .collect_vec(),
-            )
-            .chain([(
-                commitments.quotient_chunks.clone(),
-                quotient_chunks_domains
-                    .iter()
-                    .zip(&opened_values.quotient_chunks)
-                    .map(|(domain, values)| (*domain, vec![(zeta, values.clone())]))
                     .collect_vec(),
-            )])
-            .collect_vec(),
-        opening_proof,
-        challenger,
-    )
-    .map_err(VerificationError::InvalidOpeningArgument)?;
+                )
+                .chain([(
+                    commitments.quotient_chunks.clone(),
+                    quotient_chunks_domains
+                        .iter()
+                        .zip(&opened_values.quotient_chunks)
+                        .map(|(domain, values)| (*domain, vec![(zeta, values.clone())]))
+                        .collect_vec(),
+                )])
+                .collect_vec()
+        })
+        .flatten()
+        .collect();
+
+    pcs.verify(verify_input, opening_proof, challenger)
+        .map_err(VerificationError::InvalidOpeningArgument)?;
 
     let zps = quotient_chunks_domains
         .iter()

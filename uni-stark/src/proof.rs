@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{StarkGenericConfig, Val};
 
-type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
+pub type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
 >>::Commitment;
-type PcsProof<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
+pub type PcsProof<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
 >>::Proof;
@@ -25,7 +25,6 @@ pub struct Proof<SC: StarkGenericConfig> {
     pub(crate) commitments: Commitments<Com<SC>>,
     pub(crate) opened_values: OpenedValues<SC::Challenge>,
     pub(crate) opening_proof: PcsProof<SC>,
-    pub(crate) degree_bits: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,7 +57,7 @@ pub struct ProcessedStage<SC: StarkGenericConfig> {
     pub(crate) commitment: Com<SC>,
     pub(crate) prover_data: PcsProverData<SC>,
     pub(crate) challenge_values: Vec<Val<SC>>,
-    pub(crate) public_values: Vec<Val<SC>>,
-    #[cfg(debug_assertions)]
-    pub(crate) trace: RowMajorMatrix<Val<SC>>,
+    pub(crate) public_values: Vec<Vec<Val<SC>>>,
+    // #[cfg(debug_assertions)]
+    // pub(crate) trace: RowMajorMatrix<Val<SC>>,
 }
