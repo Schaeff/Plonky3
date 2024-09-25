@@ -75,63 +75,60 @@ where
     let pcs = config.pcs();
 
     // todo: check same length
-    let valid_shape = inputs
-        .iter()
-        .zip(opened_values)
-        .all(|(input, opened_values)| {
-            let degree = 1 << opened_values.degree_bits;
-            let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-                input.air,
-                &input
-                    .public_values_by_stage
-                    .iter()
-                    .map(|values| values.len())
-                    .collect::<Vec<_>>(),
-            );
-            let quotient_degree = 1 << log_quotient_degree;
-            let stage_count = proof.commitments.traces_by_stage.len();
-            let challenge_counts: Vec<usize> = (0..stage_count)
-                .map(|i| {
-                    <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(
-                        input.air, i as u32,
-                    )
-                })
-                .collect();
+    let valid_shape = inputs.iter().all(|(input, opened_values)| {
+        let degree = 1 << opened_values.degree_bits;
+        let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+            input.air,
+            &input
+                .public_values_by_stage
+                .iter()
+                .map(|values| values.len())
+                .collect::<Vec<_>>(),
+        );
+        let quotient_degree = 1 << log_quotient_degree;
+        let stage_count = proof.commitments.traces_by_stage.len();
+        let challenge_counts: Vec<usize> = (0..stage_count)
+            .map(|i| {
+                <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(
+                    input.air, i as u32,
+                )
+            })
+            .collect();
 
-            let trace_domain = pcs.natural_domain_for_degree(degree);
-            let quotient_domain = trace_domain
-                .create_disjoint_domain(1 << (opened_values.degree_bits + log_quotient_degree));
-            let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
+        let trace_domain = pcs.natural_domain_for_degree(degree);
+        let quotient_domain = trace_domain
+            .create_disjoint_domain(1 << (opened_values.degree_bits + log_quotient_degree));
+        let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
 
-            let air_widths = (0..stage_count)
-                .map(|stage| {
-                    <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(
-                        input.air,
-                        stage as u32,
-                    )
-                })
-                .collect::<Vec<usize>>();
-            let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(input.air);
-            opened_values.preprocessed_local.len() == air_fixed_width
-                && opened_values.preprocessed_next.len() == air_fixed_width
-                && opened_values
-                    .traces_by_stage_local
-                    .iter()
-                    .zip(&air_widths)
-                    .all(|(stage, air_width)| stage.len() == *air_width)
-                && opened_values
-                    .traces_by_stage_next
-                    .iter()
-                    .zip(&air_widths)
-                    .all(|(stage, air_width)| stage.len() == *air_width)
-                && opened_values.quotient_chunks.len() == quotient_degree
-                && opened_values
-                    .quotient_chunks
-                    .iter()
-                    .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
-                && input.public_values_by_stage.len() == stage_count
-                && challenge_counts.len() == stage_count
-        });
+        let air_widths = (0..stage_count)
+            .map(|stage| {
+                <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(
+                    input.air,
+                    stage as u32,
+                )
+            })
+            .collect::<Vec<usize>>();
+        let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(input.air);
+        opened_values.preprocessed_local.len() == air_fixed_width
+            && opened_values.preprocessed_next.len() == air_fixed_width
+            && opened_values
+                .traces_by_stage_local
+                .iter()
+                .zip(&air_widths)
+                .all(|(stage, air_width)| stage.len() == *air_width)
+            && opened_values
+                .traces_by_stage_next
+                .iter()
+                .zip(&air_widths)
+                .all(|(stage, air_width)| stage.len() == *air_width)
+            && opened_values.quotient_chunks.len() == quotient_degree
+            && opened_values
+                .quotient_chunks
+                .iter()
+                .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
+            && input.public_values_by_stage.len() == stage_count
+            && challenge_counts.len() == stage_count
+    });
 
     if !valid_shape {
         return Err(VerificationError::InvalidProofShape);

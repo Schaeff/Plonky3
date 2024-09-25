@@ -17,8 +17,9 @@ use tracing::{info_span, instrument};
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::traits::MultiStageAir;
 use crate::{
-    Com, Commitments, Domain, OpenedValues, PackedChallenge, PackedVal, PcsProof, PcsProverData,
-    ProcessedStage, Proof, ProverConstraintFolder, StarkGenericConfig, StarkProvingKey, Val,
+    ChipOpenedValues, Com, Commitments, Domain, PackedChallenge, PackedVal, PcsProof,
+    PcsProverData, ProcessedStage, Proof, ProverConstraintFolder, StarkGenericConfig,
+    StarkProvingKey, Val,
 };
 
 struct UnusedCallback;
@@ -239,7 +240,7 @@ where
         state: &mut ProverState<SC, A>,
         proving_key: Option<&StarkProvingKey<SC>>,
         quotient_data: PcsProverData<SC>,
-    ) -> (OpenedValues<SC::Challenge>, PcsProof<SC>) {
+    ) -> (Vec<ChipOpenedValues<SC::Challenge>>, PcsProof<SC>) {
         let zeta: SC::Challenge = state.challenger.sample();
 
         let preprocessed_opening_points: Vec<Vec<_>> = self
@@ -300,41 +301,99 @@ where
             state.challenger,
         );
 
-        let mut opened_values = opened_values.iter();
+        let mut opened_values = opened_values.into_iter();
 
         // maybe get values for the preprocessed columns
         let (preprocessed_local, preprocessed_next) = if proving_key.is_some() {
             let value = opened_values.next().unwrap();
-            assert_eq!(value.len(), 1);
-            assert_eq!(value[0].len(), 2);
-            (value[0][0].clone(), value[0][1].clone())
+            assert_eq!(value.len(), state.program.table_count());
+            value
+                .into_iter()
+                .map(|v| (v[0].clone(), v[1].clone()))
+                .unzip()
         } else {
-            (vec![], vec![])
+            (
+                vec![vec![]; state.program.table_count()],
+                vec![vec![]; state.program.table_count()],
+            )
         };
+
+        // for each stage, for each table
+
+        // output for each table, for each stage
 
         // get values for the traces
-        let (traces_by_stage_local, traces_by_stage_next): (Vec<_>, Vec<_>) = state
-            .processed_stages
-            .iter()
-            .map(|_| {
-                let value = opened_values.next().unwrap();
-                assert_eq!(value.len(), 1);
-                assert_eq!(value[0].len(), 2);
-                (value[0][0].clone(), value[0][1].clone())
-            })
-            .unzip();
+        let (traces_by_stage_local, traces_by_stage_next): (Vec<Vec<Vec<_>>>, Vec<Vec<Vec<_>>>) =
+            state
+                .processed_stages
+                .iter()
+                .fold(
+                    vec![(vec![], vec![]); state.program.table_count()],
+                    |mut traces_by_table, _| {
+                        let mut values = opened_values.next().unwrap();
+                        for ((local, next), v) in
+                            traces_by_table.iter_mut().zip_eq(values.iter_mut())
+                        {
+                            assert_eq!(v.len(), 2);
+                            next.push(v.pop().unwrap());
+                            local.push(v.pop().unwrap());
+                        }
+                        traces_by_table
+                    },
+                )
+                .into_iter()
+                .unzip();
 
         // get values for the quotient
-        let value = opened_values.next().unwrap();
-        let quotient_chunks = value.iter().map(|v| v[0].clone()).collect_vec();
+        let mut value = opened_values.next().unwrap().into_iter();
+        let quotient_chunks: Vec<Vec<Vec<SC::Challenge>>> = self
+            .tables
+            .iter()
+            .map(|i| {
+                let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+                    i.air,
+                    &state
+                        .processed_stages
+                        .iter()
+                        .map(|s| s.public_values.len())
+                        .collect::<Vec<_>>(),
+                );
+                let quotient_degree = 1 << log_quotient_degree;
+                (&mut value)
+                    .take(quotient_degree)
+                    .map(|mut v| {
+                        assert_eq!(v.len(), 1);
+                        v.pop().unwrap()
+                    })
+                    .collect()
+            })
+            .collect();
 
-        let opened_values = OpenedValues {
-            traces_by_stage_local,
-            traces_by_stage_next,
-            preprocessed_local,
-            preprocessed_next,
-            quotient_chunks,
-        };
+        let opened_values = preprocessed_local
+            .into_iter()
+            .zip_eq(preprocessed_next)
+            .zip_eq(
+                traces_by_stage_local
+                    .into_iter()
+                    .zip_eq(traces_by_stage_next),
+            )
+            .zip_eq(quotient_chunks)
+            .map(
+                |(
+                    (
+                        (preprocessed_local, preprocessed_next),
+                        (traces_by_stage_local, traces_by_stage_next),
+                    ),
+                    quotient_chunks,
+                )| ChipOpenedValues {
+                    preprocessed_local,
+                    preprocessed_next,
+                    traces_by_stage_local,
+                    traces_by_stage_next,
+                    quotient_chunks,
+                },
+            )
+            .collect();
 
         (opened_values, proof)
     }

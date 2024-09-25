@@ -23,7 +23,7 @@ pub type PcsProverData<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
 #[serde(bound = "")]
 pub struct Proof<SC: StarkGenericConfig> {
     pub(crate) commitments: Commitments<Com<SC>>,
-    pub(crate) opened_values: OpenedValues<SC::Challenge>,
+    pub(crate) opened_values: Vec<ChipOpenedValues<SC::Challenge>>,
     pub(crate) opening_proof: PcsProof<SC>,
 }
 
@@ -34,7 +34,7 @@ pub struct Commitments<Com> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct OpenedValues<Challenge> {
+pub struct ChipOpenedValues<Challenge> {
     pub(crate) preprocessed_local: Vec<Challenge>,
     pub(crate) preprocessed_next: Vec<Challenge>,
     pub(crate) traces_by_stage_local: Vec<Vec<Challenge>>,
