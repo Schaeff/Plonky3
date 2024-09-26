@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 
 use p3_commit::Pcs;
-use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 
 use crate::{StarkGenericConfig, Val};
@@ -40,6 +39,7 @@ pub struct ChipOpenedValues<Challenge> {
     pub(crate) traces_by_stage_local: Vec<Vec<Challenge>>,
     pub(crate) traces_by_stage_next: Vec<Vec<Challenge>>,
     pub(crate) quotient_chunks: Vec<Vec<Challenge>>,
+    pub(crate) log_degree: usize,
 }
 
 pub struct StarkProvingKey<SC: StarkGenericConfig> {

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::iter::{self, once};
 use core::marker::PhantomData;
 
-use itertools::{izip, Itertools};
+use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
@@ -130,7 +130,6 @@ where
             .map(|(index, (i, public_count))| {
                 let log_quotient_degree =
                     get_log_quotient_degree::<Val<SC>, A>(i.air, &public_count);
-                let quotient_degree = 1 << log_quotient_degree;
 
                 let quotient_domain = i
                     .trace_domain(state.pcs)
@@ -369,6 +368,13 @@ where
             })
             .collect();
 
+        let log_degrees: Vec<_> = state
+            .program
+            .tables
+            .iter()
+            .map(|table| table.log_degree())
+            .collect();
+
         let opened_values = preprocessed_local
             .into_iter()
             .zip_eq(preprocessed_next)
@@ -378,19 +384,24 @@ where
                     .zip_eq(traces_by_stage_next),
             )
             .zip_eq(quotient_chunks)
+            .zip_eq(log_degrees)
             .map(
                 |(
                     (
-                        (preprocessed_local, preprocessed_next),
-                        (traces_by_stage_local, traces_by_stage_next),
+                        (
+                            (preprocessed_local, preprocessed_next),
+                            (traces_by_stage_local, traces_by_stage_next),
+                        ),
+                        quotient_chunks,
                     ),
-                    quotient_chunks,
+                    log_degree,
                 )| ChipOpenedValues {
                     preprocessed_local,
                     preprocessed_next,
                     traces_by_stage_local,
                     traces_by_stage_next,
                     quotient_chunks,
+                    log_degree,
                 },
             )
             .collect();
@@ -657,7 +668,7 @@ where
         .collect()
 }
 
-pub struct ProverState<
+struct ProverState<
     'a,
     SC,
     #[cfg(debug_assertions)] A: for<'b> Air<crate::check_constraints::DebugConstraintBuilder<'b, Val<SC>>>,
@@ -721,7 +732,7 @@ where
 
         // observe the public inputs for this stage
         for public_values in &public_values {
-            self.challenger.observe_slice(&public_values);
+            self.challenger.observe_slice(public_values);
         }
         self.challenger.observe(commitment.clone());
 
