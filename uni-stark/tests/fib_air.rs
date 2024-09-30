@@ -56,7 +56,14 @@ impl<AB: AirBuilderWithPublicValues> Air<AB> for FibonacciAir {
     }
 }
 
-impl<AB: AirBuilderWithPublicValues> MultiStageAir<AB> for FibonacciAir {}
+impl<AB: AirBuilderWithPublicValues> MultiStageAir<AB> for FibonacciAir {
+    fn stage_public_count(&self, stage: u32) -> usize {
+        match stage {
+            0 => 3,
+            _ => unreachable!(),
+        }
+    }
+}
 
 pub fn generate_trace_rows<F: PrimeField64>(a: u64, b: u64, n: usize) -> RowMajorMatrix<F> {
     assert!(n.is_power_of_two());

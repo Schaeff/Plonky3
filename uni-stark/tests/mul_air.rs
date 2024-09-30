@@ -116,7 +116,11 @@ impl<AB: AirBuilder> Air<AB> for MulAir {
     }
 }
 
-impl<AB: AirBuilderWithPublicValues> MultiStageAir<AB> for MulAir {}
+impl<AB: AirBuilderWithPublicValues> MultiStageAir<AB> for MulAir {
+    fn stage_public_count(&self, _: u32) -> usize {
+        0
+    }
+}
 
 fn do_test<SC: StarkGenericConfig>(
     config: SC,

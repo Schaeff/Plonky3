@@ -1,6 +1,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use core::iter;
+use p3_air::BaseAir;
 
 use itertools::{izip, Itertools};
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
@@ -16,62 +17,6 @@ use crate::{
     ChipOpenedValues, PcsError, Proof, StarkGenericConfig, StarkVerifyingKey, Val,
     VerifierConstraintFolder,
 };
-
-// todo: check same length
-// let valid_shape = inputs.iter().all(|(input, opened_values)| {
-//     let degree = 1 << opened_values.degree_bits;
-//     let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-//         input.air,
-//         &input
-//             .public_values_by_stage
-//             .iter()
-//             .map(|values| values.len())
-//             .collect::<Vec<_>>(),
-//     );
-//     let quotient_degree = 1 << log_quotient_degree;
-//     let stage_count = proof.commitments.traces_by_stage.len();
-//     let challenge_counts: Vec<usize> = (0..stage_count)
-//         .map(|i| {
-//             <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(
-//                 input.air, i as u32,
-//             )
-//         })
-//         .collect();
-
-//     let trace_domain = pcs.natural_domain_for_degree(degree);
-//     let quotient_domain = trace_domain
-//         .create_disjoint_domain(1 << (opened_values.degree_bits + log_quotient_degree));
-//     let quotient_chunks_domains = quotient_domain.split_domains(quotient_degree);
-
-//     let air_widths = (0..stage_count)
-//         .map(|stage| {
-//             <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(
-//                 input.air,
-//                 stage as u32,
-//             )
-//         })
-//         .collect::<Vec<usize>>();
-//     let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(input.air);
-//     opened_values.preprocessed_local.len() == air_fixed_width
-//         && opened_values.preprocessed_next.len() == air_fixed_width
-//         && opened_values
-//             .traces_by_stage_local
-//             .iter()
-//             .zip(&air_widths)
-//             .all(|(stage, air_width)| stage.len() == *air_width)
-//         && opened_values
-//             .traces_by_stage_next
-//             .iter()
-//             .zip(&air_widths)
-//             .all(|(stage, air_width)| stage.len() == *air_width)
-//         && opened_values.quotient_chunks.len() == quotient_degree
-//         && opened_values
-//             .quotient_chunks
-//             .iter()
-//             .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
-//         && input.public_values_by_stage.len() == stage_count
-//         && challenge_counts.len() == stage_count
-// });
 
 #[instrument(skip_all)]
 pub fn verify<SC, A>(
@@ -99,7 +44,7 @@ where
     )
 }
 
-/// A sub-table to be proven, in the form of an air, a proving key
+/// A sub-table to be proven, in the form of an air and values for the public inputs
 struct Table<
     'a,
     SC: StarkGenericConfig,
@@ -128,6 +73,8 @@ where
         return Err(VerificationError::InvalidProofShape);
     }
 
+    let pcs = config.pcs();
+
     let Proof {
         commitments,
         opened_values,
@@ -139,8 +86,6 @@ where
     }
 
     // loop through stages observing the trace and issuing challenges
-
-    let pcs = config.pcs();
 
     // Observe the instances.
     for opened_values in opened_values {
@@ -186,6 +131,7 @@ where
             (0..challenge_count).map(|_| challenger.sample()).collect()
         })
         .collect_vec();
+
     let alpha: SC::Challenge = challenger.sample_ext_element();
     challenger.observe(commitments.quotient_chunks.clone());
 
@@ -308,8 +254,7 @@ where
         public_values,
     ) {
         // Verify the shape of the opening arguments matches the expected values.
-        verify_opening_shape(table, opened_values)
-            .map_err(|e| todo!("invalid opening shape, add error"))?;
+        verify_opening_shape(table, opened_values)?;
         // Verify the constraint evaluation.
         let zps = quotient_chunks_domains
             .iter()
@@ -391,7 +336,54 @@ fn verify_opening_shape<
     table: &Table<'a, SC, A>,
     opened_values: &ChipOpenedValues<SC::Challenge>,
 ) -> Result<(), VerificationError<PcsError<SC>>> {
-    todo!()
+    let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
+        table.air,
+        &table
+            .public_values_by_stage
+            .iter()
+            .map(|values| values.len())
+            .collect::<Vec<_>>(),
+    );
+    let quotient_degree = 1 << log_quotient_degree;
+    let stage_count = <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_count(table.air);
+    let challenge_counts: Vec<usize> = (0..stage_count)
+        .map(|i| {
+            <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(table.air, i as u32)
+        })
+        .collect();
+
+    let air_widths = (0..stage_count)
+        .map(|stage| {
+            <A as MultiStageAir<SymbolicAirBuilder<Val<SC>>>>::stage_trace_width(
+                table.air,
+                stage as u32,
+            )
+        })
+        .collect::<Vec<usize>>();
+    let air_fixed_width = <A as BaseAir<Val<SC>>>::preprocessed_width(table.air);
+
+    let res = opened_values.preprocessed_local.len() == air_fixed_width
+        && opened_values.preprocessed_next.len() == air_fixed_width
+        && opened_values
+            .traces_by_stage_local
+            .iter()
+            .zip(&air_widths)
+            .all(|(stage, air_width)| stage.len() == *air_width)
+        && opened_values
+            .traces_by_stage_next
+            .iter()
+            .zip(&air_widths)
+            .all(|(stage, air_width)| stage.len() == *air_width)
+        && opened_values.quotient_chunks.len() == quotient_degree
+        && opened_values
+            .quotient_chunks
+            .iter()
+            .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
+        && table.public_values_by_stage.len() == stage_count
+        && challenge_counts.len() == stage_count;
+
+    res.then_some(())
+        .ok_or(VerificationError::InvalidProofShape)
 }
 
 #[derive(Debug)]

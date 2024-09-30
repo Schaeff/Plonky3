@@ -21,7 +21,14 @@ impl<F> BaseAir<F> for KeccakAir {
     }
 }
 
-impl<AB: AirBuilder> MultiStageAir<AB> for KeccakAir {}
+impl<AB: AirBuilder> MultiStageAir<AB> for KeccakAir {
+    fn stage_public_count(&self, stage: u32) -> usize {
+        match stage {
+            0 => 0,
+            _ => unreachable!()
+        }
+    }
+}
 
 impl<AB: AirBuilder> Air<AB> for KeccakAir {
     #[inline]

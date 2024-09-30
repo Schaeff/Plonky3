@@ -8,7 +8,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
 use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
@@ -87,6 +87,11 @@ where
         self.tables.len()
     }
 
+    /// Returns the number of stages in the table with the most stages.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there are no tables.
     fn stage_count(&self) -> u32 {
         self.tables
             .iter()
@@ -96,144 +101,57 @@ where
             .unwrap() as u32
     }
 
+    /// Observe the instance for each table.
     fn observe_instances(&self, challenger: &mut SC::Challenger) {
         for input in &self.tables {
             input.observe_instance(challenger);
         }
     }
 
+    fn quotient_chunks_count(&self) -> usize {
+        self.tables
+            .iter()
+            .map(|table| 1 << table.log_quotient_degree())
+            .sum()
+    }
+
+    /// Commit to the quotient polynomial across all tables.
+    ///
+    /// Returns a single commitment and the prover data.
     fn commit_to_quotient(
         &self,
         state: &mut ProverState<'a, SC, A>,
         proving_key: Option<&StarkProvingKey<SC>>,
     ) -> (Com<SC>, PcsProverData<SC>) {
-        let public_input_count_per_table_per_stage: Vec<Vec<usize>> = self
-            .tables
-            .iter()
-            .enumerate()
-            .map(|(index, _)| {
-                state
-                    .processed_stages
-                    .iter()
-                    .map(|stage| stage.public_values[index].len())
-                    .collect()
-            })
-            .collect();
-
         let alpha: SC::Challenge = state.challenger.sample_ext_element();
-        // check index in get_evaluations_on_domain
-        let quotient_values: Vec<_> = self
+
+        // get the quotient domains and chunks for each table
+        let quotient_domains_and_chunks: Vec<_> = self
             .tables
             .iter()
-            .zip(public_input_count_per_table_per_stage)
             .enumerate()
-            .map(|(index, (i, public_count))| {
-                let log_quotient_degree =
-                    get_log_quotient_degree::<Val<SC>, A>(i.air, &public_count);
-
-                let quotient_domain = i
-                    .trace_domain(state.pcs)
-                    .create_disjoint_domain(1 << (i.log_degree() + log_quotient_degree));
-
-                let preprocessed_on_quotient_domain = proving_key.map(|proving_key| {
-                    state.pcs.get_evaluations_on_domain(
-                        &proving_key.preprocessed_data,
-                        index,
-                        quotient_domain,
-                    )
-                });
-
-                let traces_on_quotient_domain = state
-                    .processed_stages
-                    .iter()
-                    .map(|s| {
-                        state
-                            .pcs
-                            .get_evaluations_on_domain(&s.prover_data, index, quotient_domain)
-                    })
-                    .collect();
-
-                let challenges = state
-                    .processed_stages
-                    .iter()
-                    .map(|stage| stage.challenge_values.clone())
-                    .collect();
-
-                let public_values_by_stage = state
-                    .processed_stages
-                    .iter()
-                    .map(|stage| stage.public_values[index].clone())
-                    .collect();
-
-                quotient_values(
-                    i.air,
-                    &public_values_by_stage,
-                    i.trace_domain(state.pcs),
-                    quotient_domain,
-                    preprocessed_on_quotient_domain,
-                    traces_on_quotient_domain,
-                    challenges,
-                    alpha,
-                )
-            })
+            .flat_map(|(index, i)| i.quotient_domains_and_chunks(index, state, proving_key, alpha))
             .collect();
 
-        //this depends on the number of public values for each air of each table, which is not available from the air. Is it because it can be dynamic?
-        let log_quotient_degrees: Vec<_> = self
-            .tables
-            .iter()
-            .map(|i| {
-                get_log_quotient_degree::<Val<SC>, A>(
-                    i.air,
-                    &state
-                        .processed_stages
-                        .iter()
-                        .map(|s| s.public_values.len())
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
+        assert_eq!(
+            quotient_domains_and_chunks.len(),
+            self.quotient_chunks_count()
+        );
 
-        let quotient_domains: Vec<_> = self
-            .tables
-            .iter()
-            .map(|i| {
-                let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-                    i.air,
-                    &state
-                        .processed_stages
-                        .iter()
-                        .map(|s| s.public_values.len())
-                        .collect::<Vec<_>>(),
-                );
-                i.trace_domain(state.pcs)
-                    .create_disjoint_domain(1 << (i.log_degree() + log_quotient_degree))
-            })
-            .collect();
-
-        // Split the quotient values and commit to them.
-        let quotient_domains_and_chunks = quotient_domains
-            .iter()
-            .zip_eq(quotient_values)
-            .zip_eq(log_quotient_degrees.iter())
-            .flat_map(
-                |((quotient_domain, quotient_values), log_quotient_degree)| {
-                    let quotient_degree = 1 << *log_quotient_degree;
-                    let quotient_flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
-                    let quotient_chunks =
-                        quotient_domain.split_evals(quotient_degree, quotient_flat);
-                    let qc_domains = quotient_domain.split_domains(quotient_degree);
-                    qc_domains.into_iter().zip_eq(quotient_chunks)
-                },
-            )
-            .collect::<Vec<_>>();
-
+        // commit to the chunks
         let (quotient_commit, quotient_data) = info_span!("commit to quotient poly chunks")
             .in_scope(|| state.pcs.commit(quotient_domains_and_chunks));
+        // observe the commitment
         state.challenger.observe(quotient_commit.clone());
+
         (quotient_commit, quotient_data)
     }
 
+    /// Opens the commitments to the preprocessed trace, the traces, and the quotient polynomial.
+    ///
+    /// # Panics
+    ///
+    /// Panics if .
     fn open(
         &self,
         state: &mut ProverState<SC, A>,
@@ -242,18 +160,20 @@ where
     ) -> (Vec<ChipOpenedValues<SC::Challenge>>, PcsProof<SC>) {
         let zeta: SC::Challenge = state.challenger.sample();
 
-        let preprocessed_opening_points: Vec<Vec<_>> = self
-            .tables
-            .iter()
-            .map(|input| {
-                vec![
-                    zeta,
-                    input.trace_domain(state.pcs).next_point(zeta).unwrap(),
-                ]
-            })
-            .collect();
-
-        let preprocessed_data = &proving_key.as_ref().unwrap().preprocessed_data;
+        let preprocessed_data_and_opening_points = proving_key.as_ref().map(|key| {
+            (
+                &key.preprocessed_data,
+                self.tables
+                    .iter()
+                    .map(|input| {
+                        vec![
+                            zeta,
+                            input.trace_domain(state.pcs).next_point(zeta).unwrap(),
+                        ]
+                    })
+                    .collect(),
+            )
+        });
 
         let trace_data_and_points_per_stage: Vec<(_, Vec<Vec<_>>)> = state
             .processed_stages
@@ -263,37 +183,23 @@ where
                     .tables
                     .iter()
                     .map(|input| {
-                        let zeta_next = input.trace_domain(state.pcs).next_point(zeta).unwrap();
-                        vec![zeta, zeta_next]
+                        vec![
+                            zeta,
+                            input.trace_domain(state.pcs).next_point(zeta).unwrap(),
+                        ]
                     })
                     .collect();
                 (&processed_stage.prover_data, points)
             })
             .collect();
 
-        // avoid computing this twice, already in commit
-        let quotient_domains: Vec<_> = self
-            .tables
-            .iter()
-            .map(|i| {
-                let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-                    i.air,
-                    &state
-                        .processed_stages
-                        .iter()
-                        .map(|s| s.public_values.len())
-                        .collect::<Vec<_>>(),
-                );
-                i.trace_domain(state.pcs)
-                    .create_disjoint_domain(1 << (i.log_degree() + log_quotient_degree))
-            })
+        let quotient_opening_points: Vec<_> = (0..self.quotient_chunks_count())
+            .map(|_| vec![zeta])
             .collect();
 
-        let quotient_opening_points: Vec<Vec<_>> =
-            quotient_domains.iter().map(|_| vec![zeta]).collect();
-
         let (opened_values, proof) = state.pcs.open(
-            once((preprocessed_data, preprocessed_opening_points))
+            preprocessed_data_and_opening_points
+                .into_iter()
                 .chain(trace_data_and_points_per_stage)
                 .chain(once((&quotient_data, quotient_opening_points)))
                 .collect(),
@@ -349,14 +255,7 @@ where
             .tables
             .iter()
             .map(|i| {
-                let log_quotient_degree = get_log_quotient_degree::<Val<SC>, A>(
-                    i.air,
-                    &state
-                        .processed_stages
-                        .iter()
-                        .map(|s| s.public_values.len())
-                        .collect::<Vec<_>>(),
-                );
+                let log_quotient_degree = i.log_quotient_degree();
                 let quotient_degree = 1 << log_quotient_degree;
                 (&mut value)
                     .take(quotient_degree)
@@ -408,6 +307,23 @@ where
 
         (opened_values, proof)
     }
+
+    /// For a given stage, return the number of challenges required by the table with the most challenges.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there are no tables.
+    fn stage_challenge_count(&self, stage_id: u32) -> usize {
+        self.tables
+            .iter()
+            .map(|table| {
+                <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(
+                    table.air, stage_id,
+                )
+            })
+            .max()
+            .unwrap()
+    }
 }
 
 /// A sub-table to be proven, in the form of an air, a proving key, a stage 0 trace and stage 0 publics
@@ -417,7 +333,17 @@ struct Table<'a, SC, A> {
     marker: PhantomData<SC>,
 }
 
-impl<'a, SC: StarkGenericConfig, A> Table<'a, SC, A> {
+impl<
+        'a,
+        SC,
+        #[cfg(debug_assertions)] A: for<'b> Air<crate::check_constraints::DebugConstraintBuilder<'b, Val<SC>>>,
+        #[cfg(not(debug_assertions))] A,
+    > Table<'a, SC, A>
+where
+    SC: StarkGenericConfig,
+    A: MultiStageAir<SymbolicAirBuilder<Val<SC>>>
+        + for<'b> MultiStageAir<ProverConstraintFolder<'b, SC>>,
+{
     fn log_degree(&self) -> usize {
         log2_strict_usize(self.degree)
     }
@@ -426,9 +352,90 @@ impl<'a, SC: StarkGenericConfig, A> Table<'a, SC, A> {
         pcs.natural_domain_for_degree(self.degree)
     }
 
+    fn public_input_count_per_stage(&self) -> Vec<usize> {
+        (0..<A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_count(self.air))
+            .map(|stage| {
+                <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_public_count(
+                    self.air,
+                    stage as u32,
+                )
+            })
+            .collect()
+    }
+
+    fn log_quotient_degree(&self) -> usize {
+        get_log_quotient_degree(self.air, &self.public_input_count_per_stage())
+    }
+
     fn observe_instance(&self, challenger: &mut SC::Challenger) {
         challenger.observe(Val::<SC>::from_canonical_usize(self.log_degree()));
         // TODO: Might be best practice to include other instance data here; see verifier comment.
+    }
+
+    /// Compute the quotient domains and chunks for this table.
+    /// * Arguments:
+    ///    * `index`: The index of the table in the program. This is used as the index for this table in the mmcs.
+    ///    * `state`: The current prover state.
+    ///    * `proving_key`: The proving key, if it exists.
+    ///    * `alpha`: The challenge value for the quotient polynomial.
+    fn quotient_domains_and_chunks(
+        &self,
+        index: usize,
+        state: &ProverState<SC, A>,
+        proving_key: Option<&StarkProvingKey<SC>>,
+        alpha: SC::Challenge,
+    ) -> Vec<(Domain<SC>, DenseMatrix<Val<SC>>)> {
+        let quotient_domain = self
+            .trace_domain(state.pcs)
+            .create_disjoint_domain(1 << (self.log_degree() + self.log_quotient_degree()));
+
+        let preprocessed_on_quotient_domain = proving_key.map(|proving_key| {
+            state.pcs.get_evaluations_on_domain(
+                &proving_key.preprocessed_data,
+                index,
+                quotient_domain,
+            )
+        });
+
+        let traces_on_quotient_domain = state
+            .processed_stages
+            .iter()
+            .map(|s| {
+                state
+                    .pcs
+                    .get_evaluations_on_domain(&s.prover_data, index, quotient_domain)
+            })
+            .collect();
+
+        let challenges = state
+            .processed_stages
+            .iter()
+            .map(|stage| stage.challenge_values.clone())
+            .collect();
+
+        let public_values_by_stage = state
+            .processed_stages
+            .iter()
+            .map(|stage| stage.public_values[index].clone())
+            .collect();
+
+        let quotient_values = quotient_values(
+            self.air,
+            &public_values_by_stage,
+            self.trace_domain(state.pcs),
+            quotient_domain,
+            preprocessed_on_quotient_domain,
+            traces_on_quotient_domain,
+            challenges,
+            alpha,
+        );
+
+        let quotient_flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
+
+        let quotient_degree = 1 << self.log_quotient_degree();
+        let quotient_chunks = quotient_domain.split_evals(quotient_degree, quotient_flat);
+        let qc_domains = quotient_domain.split_domains(quotient_degree);
+        qc_domains.into_iter().zip_eq(quotient_chunks).collect()
     }
 }
 
@@ -457,10 +464,6 @@ where
     assert_eq!(stage_0_traces.len(), stage_0_publics.len());
     assert_eq!(stage_0_traces.len(), program.table_count());
 
-    // let degree = stage_0_trace.height();
-    // let log_degree = log2_strict_usize(degree);
-
-    // the stage count is the max of all stage counts
     let stage_count = program.stage_count();
 
     let pcs = config.pcs();
@@ -473,7 +476,7 @@ where
     };
 
     let mut state = ProverState::new(&program, pcs, challenger);
-    // assumption: stages are ordered like airs in `state.tables`. Maybe we can enforce this better.
+    // assumption: stages are ordered like in airs in `state.tables`. Maybe we can enforce this better.
     let mut stage = Stage {
         id: 0,
         air_stages: stage_0_traces
@@ -726,32 +729,23 @@ where
             })
             .unzip();
 
-        // commit to the trace for this stage
+        // commit to the traces
         let (commitment, prover_data) =
             info_span!("commit to stage {stage} data").in_scope(|| self.pcs.commit(commit_inputs));
 
-        // observe the public inputs for this stage
+        self.challenger.observe(commitment.clone());
+        // observe the public inputs. Is this fine to do after the trace commitment?
         for public_values in &public_values {
+            println!("pi {public_values:?}");
             self.challenger.observe_slice(public_values);
         }
-        self.challenger.observe(commitment.clone());
 
-        let challenge_count = self
-            .program
-            .tables
-            .iter()
-            .map(|table| {
-                <A as MultiStageAir<SymbolicAirBuilder<_>>>::stage_challenge_count(
-                    table.air, stage.id,
-                )
-            })
-            .max()
-            .unwrap();
-
-        let challenge_values = (0..challenge_count)
+        // draw challenges
+        let challenge_values = (0..self.program.stage_challenge_count(stage.id))
             .map(|_| self.challenger.sample())
             .collect();
 
+        // update the state with the output of this stage
         self.processed_stages.push(ProcessedStage {
             public_values,
             prover_data,
@@ -760,6 +754,7 @@ where
             // #[cfg(debug_assertions)]
             // trace,
         });
+
         self
     }
 }
